@@ -55,6 +55,7 @@ builder.Services.AddControllers()
 // Registro de servicios
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<AuthUtils>();
+builder.Services.AddScoped<ScrumUtils>();
 builder.Services.AddScoped<TokensUtils>();
 
 // Registrar IMemoryCache
@@ -67,7 +68,7 @@ builder.Services.AddSignalR();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
-    c.SwaggerDoc("v1", new OpenApiInfo { Title = "My API", Version = "v1" });
+    c.SwaggerDoc("v1", new OpenApiInfo { Title = "Solucion integral", Version = "v1" });
     c.OperationFilter<FileUploadOperationFilter>();
 
     var securityScheme = new OpenApiSecurityScheme
@@ -98,7 +99,7 @@ var app = builder.Build();
 app.UseSwagger();
 app.UseSwaggerUI(c =>
 {
-    c.SwaggerEndpoint("/swagger/v1/swagger.json", "My API V1");
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "Solucion integral V1");
     c.RoutePrefix = string.Empty; // Acceso a Swagger en la raíz
 });
 

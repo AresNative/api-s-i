@@ -25,6 +25,12 @@ public class TokensUtils
 
     public string GenerateJwtToken(LoginModel login, int? userId = null)
     {
+        if (string.IsNullOrEmpty(_configuration["JwtSettings:Key"]))
+        {
+            _logger.LogError("La clave JWT (JwtSettings:Key) no está configurada correctamente.");
+            throw new InvalidOperationException("JWT Key no configurada.");
+        }
+
         var claims = new List<Claim>
     {
         new Claim(JwtRegisteredClaimNames.Sub, login.Email),
@@ -37,8 +43,10 @@ public class TokensUtils
             claims.Add(new Claim("userId", userId.Value.ToString()));
         }
 
-        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_configuration["JwtSettings:Key"]));
-        var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+        var keyBytes = Encoding.UTF8.GetBytes(_configuration["JwtSettings:Key"]);
+        var securityKey = new SymmetricSecurityKey(keyBytes);
+
+        var creds = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
 
         var token = new JwtSecurityToken(
             issuer: _configuration["JwtSettings:Issuer"],
@@ -48,8 +56,11 @@ public class TokensUtils
             signingCredentials: creds
         );
 
-        return new JwtSecurityTokenHandler().WriteToken(token);
+        var tokenString = new JwtSecurityTokenHandler().WriteToken(token);
+        _logger.LogInformation("Token JWT generado correctamente para el usuario: {Email}", login.Email);
+        return tokenString;
     }
+
 
     public async Task<bool> IsTokenActive(string email, string token)
     {

@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Logging;
 using Microsoft.Data.SqlClient;
 using MyApiProject.Models;
 using System.IdentityModel.Tokens.Jwt;
@@ -66,6 +65,38 @@ public class AuthUtils
             throw;
         }
     }
+    public async Task<Usuario?> GetUsuarioByEmailAsync(string email)
+    {
+        const string query = "SELECT * FROM usuarios WHERE email = @Email";
+
+        try
+        {
+            await using var connection = await OpenConnectionAsync();
+            await using var command = new SqlCommand(query, connection);
+            command.Parameters.AddWithValue("@Email", email);
+
+            await using var reader = await command.ExecuteReaderAsync();
+
+            if (await reader.ReadAsync())
+            {
+                var usuario = new Usuario
+                {
+                    email = reader["email"]?.ToString(),
+                    rol = reader["rol"]?.ToString(),
+                    // Agrega aquí las demás propiedades de tu clase Usuario...
+                };
+
+                return usuario;
+            }
+
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error al obtener el usuario por email.");
+            throw;
+        }
+    }
 
 
     public string GetEmailFromToken(string token)
@@ -79,7 +110,7 @@ public class AuthUtils
         return claim?.Value ?? throw new Exception("El token no contiene un claim de correo.");
     }
 
-    public async Task InsertUserHistory(int userId, string actividad, string movement)
+    public async Task InsertUserHistory(dynamic userId, string actividad, string movement)
     {
         const string query = "INSERT INTO actividad_usuarios (usuario_id, tipo_actividad, descripcion, fecha) VALUES (@Id, @Actividad, @Mov, GETDATE())";
 

@@ -26,15 +26,15 @@ namespace MyApiProject.Models
         public IFormFile File { get; set; }
     }
 
-    public class empleados
+    public class Empleados
     {
         public string nombre { get; set; }
         public string apellido { get; set; }
         public string email { get; set; }
         public string telefono { get; set; }
         public string direccion { get; set; }
-        public string fecha_nacimiento { get; set; }
-        public string fecha_ingreso { get; set; }
+        public DateTime fecha_nacimiento { get; set; }
+        public DateTime fecha_ingreso { get; set; }
         public string puesto { get; set; }
         public string departamento { get; set; }
         public string salario { get; set; }
@@ -46,5 +46,27 @@ namespace MyApiProject.Models
         public string banco { get; set; }
         public string clabe { get; set; }
         public string usuario_id { get; set; }
+    }
+
+    public class EmpleadoUpdate
+    {
+        public string? nombre { get; set; }
+        public string? apellido { get; set; }
+        public string? email { get; set; }
+        public string? telefono { get; set; }
+        public string? direccion { get; set; }
+        public DateTime? fecha_nacimiento { get; set; }
+        public DateTime? fecha_ingreso { get; set; }
+        public string? puesto { get; set; }
+        public string? departamento { get; set; }
+        public string? salario { get; set; }
+        public string? estado { get; set; }
+        public string? rfc { get; set; }
+        public string? curp { get; set; }
+        public string? nss { get; set; }
+        public string? cuenta_bancaria { get; set; }
+        public string? banco { get; set; }
+        public string? clabe { get; set; }
+        public string? usuario_id { get; set; }
     }
 }

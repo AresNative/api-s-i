@@ -49,8 +49,14 @@ namespace MyApiProject.Controllers
         }
         protected int GetUserIdFromToken()
         {
-            var userIdClaim = User.Claims.FirstOrDefault(c => c.Type == "userId");
-            return userIdClaim != null ? int.Parse(userIdClaim.Value) : 0;
+            var userIdClaim = User?.Claims?.FirstOrDefault(c => c.Type == "userId");
+
+            if (userIdClaim != null && int.TryParse(userIdClaim.Value, out int userId))
+            {
+                return userId;
+            }
+
+            return 0; // Valor por defecto si no se encuentra el claim
         }
 
         protected async Task<IActionResult> InsertJsonToDatabaseAsync<T>(
@@ -159,19 +165,25 @@ namespace MyApiProject.Controllers
                     if (validationResult != null) return validationResult;
                 }
 
+                // Obtener propiedades con valores no nulos, excluyendo la clave primaria
                 var properties = typeof(T).GetProperties()
                     .Where(p => p.Name.ToLower() != keyColumn.ToLower())
+                    .Where(p => p.GetValue(data) != null)
                     .ToList();
 
-                var setClause = string.Join(", ", properties.Select(p => $"{p.Name} = @{p.Name}"));
+                if (!properties.Any())
+                {
+                    return BadRequest(new { Message = "No se proporcionaron campos para actualizar." });
+                }
 
+                var setClause = string.Join(", ", properties.Select(p => $"{p.Name} = @{p.Name}"));
                 var query = $"UPDATE {tableName} SET {setClause} WHERE {keyColumn} = @KeyValue";
 
                 await using var command = new SqlCommand(query, connection);
 
                 foreach (var prop in properties)
                 {
-                    var value = prop.GetValue(data) ?? DBNull.Value;
+                    var value = prop.GetValue(data);
                     command.Parameters.AddWithValue($"@{prop.Name}", value);
                 }
 
@@ -179,8 +191,9 @@ namespace MyApiProject.Controllers
 
                 var result = await command.ExecuteNonQueryAsync();
 
-                return result > 0 ? Ok(new { Message = "Informacion actualizada correctamente." }) :
-                                    NotFound(new { Message = "Informacion no encontrada." });
+                return result > 0
+                    ? Ok(new { Message = "Información actualizada correctamente." })
+                    : NotFound(new { Message = "Información no encontrada." });
             }
             catch (Exception ex)
             {
