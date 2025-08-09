@@ -3,17 +3,20 @@ using Microsoft.Data.SqlClient;
 using MyApiProject.Models;
 using Microsoft.AspNetCore.Authorization;
 using Newtonsoft.Json;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace MyApiProject.Controllers
 {
     public partial class TareasController : BaseController
     {
+        private readonly IMemoryCache _memoryCache;
         private readonly AuthUtils _authUtils;
         private readonly ScrumUtils _scrumUtils;
 
-        public TareasController(IConfiguration configuration, AuthUtils authUtils, ScrumUtils scrumUtils)
-            : base(configuration, null!)
+        public TareasController(IConfiguration configuration, IMemoryCache memoryCache, AuthUtils authUtils, ScrumUtils scrumUtils)
+            : base(configuration, memoryCache)
         {
+            _memoryCache = memoryCache;
             _authUtils = authUtils;
             _scrumUtils = scrumUtils;
         }
@@ -39,18 +42,26 @@ namespace MyApiProject.Controllers
         }
 
         [Authorize]
-        [HttpGet("api/v1/tareas/consultar")]
+        [HttpGet("api/v1/tareas/consultar/{sprint_id}")]
         public async Task<IActionResult> ConsultarTarea(int sprint_id)
         {
             int userId;
             try { userId = ObtenerUsuarioId(); }
             catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); }
 
+            // Clave única para cachear resultados de un sprint específico
+            string cacheKey = $"tareas_sprint_{sprint_id}";
+
+            // Si existe en cache, devolverlo
+            if (_memoryCache.TryGetValue(cacheKey, out List<Dictionary<string, object>> cachedResults))
+            {
+                return Ok(cachedResults);
+            }
+
             string query = @"SELECT * FROM tareas WHERE sprint_id = @SprintId";
 
             await using var connection = await OpenConnectionAsync();
             await using var command = new SqlCommand(query, connection);
-
             command.Parameters.AddWithValue("@SprintId", sprint_id);
 
             await using var reader = await command.ExecuteReaderAsync();
@@ -65,11 +76,19 @@ namespace MyApiProject.Controllers
                 }
                 results.Add(row);
             }
+
+            // Guardar en caché por 5 minutos
+            _memoryCache.Set(cacheKey, results, new MemoryCacheEntryOptions
+            {
+                AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5)
+            });
+
             await _authUtils.InsertUserHistory(
-                                userId,
-                                "scrum load tasks",
-                                $"Consulta de tareas para el sprint ID {sprint_id}"
-                            );
+                userId,
+                "scrum load tasks",
+                $"Consulta de tareas para el sprint ID {sprint_id}"
+            );
+
             return Ok(results);
         }
 
@@ -99,6 +118,9 @@ namespace MyApiProject.Controllers
                     tareaId.Value,
                     $"Tarea registrada por el usuario con ID {userId}"
                 );
+
+                // Limpiar cache relacionado con tareas
+                _memoryCache.Remove($"tareas_sprint_{nuevoTarea.sprint_id}");
             }
 
             return insertResult;
@@ -142,6 +164,10 @@ namespace MyApiProject.Controllers
                     id,
                     $"Tarea actualizada por el usuario con ID {userId}"
                 );
+
+                // Invalidar todas las posibles cachés de tareas
+                if (tareaActualizado.sprint_id.HasValue)
+                    _memoryCache.Remove($"tareas_sprint_{tareaActualizado.sprint_id.Value}");
             }
 
             return updateResult;
@@ -161,7 +187,6 @@ namespace MyApiProject.Controllers
             {
                 await using var connection = await OpenConnectionAsync();
                 await using var command = new SqlCommand(query, connection);
-
                 command.Parameters.AddWithValue("@Id", id);
 
                 var result = await command.ExecuteNonQueryAsync();
@@ -179,6 +204,10 @@ namespace MyApiProject.Controllers
                         $"Tarea archivada por el usuario con ID {userId}"
                     );
 
+                    // Si quieres invalidar todas las cachés de tareas, puedes usar este patrón:
+                    // _memoryCache.Remove("tareas_sprint_" + sprint_id); // Si conoces el sprint
+                    // O invalidar globalmente si guardas una lista de claves
+
                     return Ok(new { Message = "Tarea eliminada exitosamente" });
                 }
                 else
@@ -191,5 +220,6 @@ namespace MyApiProject.Controllers
                 return HandleException(ex);
             }
         }
+
     }
 }

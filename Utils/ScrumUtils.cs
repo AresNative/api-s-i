@@ -41,30 +41,4 @@ public class ScrumUtils
             _logger.LogError(ex, "Error al registrar historial de tarea.");
         }
     }
-
-    public async Task CambiarEstadoTareaAsync(int tareaId, string nuevoEstado)
-    {
-        const string query = @"
-            UPDATE tareas 
-            SET estado = @Estado, fecha_actualizacion = GETDATE()
-            WHERE id = @TareaId";
-
-        try
-        {
-            await using var conn = await OpenConnectionAsync();
-            await using var cmd = new SqlCommand(query, conn);
-            cmd.Parameters.AddWithValue("@Estado", nuevoEstado);
-            cmd.Parameters.AddWithValue("@TareaId", tareaId);
-
-            var rows = await cmd.ExecuteNonQueryAsync();
-            if (rows > 0)
-            {
-                await RegistrarHistorialTareaAsync(tareaId, $"Estado cambiado a '{nuevoEstado}'");
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error al cambiar el estado de la tarea.");
-        }
-    }
 }

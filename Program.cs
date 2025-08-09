@@ -57,6 +57,7 @@ builder.Services.AddHttpClient();
 builder.Services.AddScoped<AuthUtils>();
 builder.Services.AddScoped<ScrumUtils>();
 builder.Services.AddScoped<TokensUtils>();
+builder.Services.AddScoped<FilterUtils>();
 
 // Registrar IMemoryCache
 builder.Services.AddMemoryCache(); // Esto es necesario para resolver IMemoryCache

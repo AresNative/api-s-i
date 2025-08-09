@@ -2,17 +2,78 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using MyApiProject.Models;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace MyApiProject.Controllers
 {
     public partial class ComentariosController : BaseController
     {
+        private readonly IMemoryCache _memoryCache;
         private readonly AuthUtils _authUtils;
-        public ComentariosController(IConfiguration configuration, AuthUtils authUtils) : base(configuration, null!)
+        public ComentariosController(IConfiguration configuration, IMemoryCache memoryCache, AuthUtils authUtils)
+        : base(configuration, memoryCache)
         {
+            _memoryCache = memoryCache;
             _authUtils = authUtils;
         }
 
+        private int ObtenerUsuarioId()
+        {
+            int userId = GetUserIdFromToken();
+            if (userId == 0)
+                throw new UnauthorizedAccessException("Token no válido o no se pudo extraer el ID del usuario.");
+            return userId;
+        }
+        [Authorize]
+        [HttpGet("api/v1/comentarios/consultar/{tareas_id}")]
+        public async Task<IActionResult> ConsultarComentarios(int tareas_id)
+        {
+            int userId;
+            try { userId = ObtenerUsuarioId(); }
+            catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); }
+
+            // Clave única para cachear resultados de un sprint específico
+            string cacheKey = $"comentarios_tarea_{tareas_id}";
+
+            // Si existe en cache, devolverlo
+            if (_memoryCache.TryGetValue(cacheKey, out List<Dictionary<string, object>> cachedResults))
+            {
+                return Ok(cachedResults);
+            }
+
+            string query = @"SELECT * FROM comentarios WHERE tarea_id = @TareaId";
+
+            await using var connection = await OpenConnectionAsync();
+            await using var command = new SqlCommand(query, connection);
+            command.Parameters.AddWithValue("@TareaId", tareas_id);
+
+            await using var reader = await command.ExecuteReaderAsync();
+            var results = new List<Dictionary<string, object>>();
+
+            while (await reader.ReadAsync())
+            {
+                var row = new Dictionary<string, object>();
+                for (int i = 0; i < reader.FieldCount; i++)
+                {
+                    row[reader.GetName(i)] = reader.GetValue(i);
+                }
+                results.Add(row);
+            }
+
+            // Guardar en caché por 5 minutos
+            _memoryCache.Set(cacheKey, results, new MemoryCacheEntryOptions
+            {
+                AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5)
+            });
+
+            await _authUtils.InsertUserHistory(
+                userId,
+                "scrum load comments",
+                $"Consulta de comentarios para la tarea con ID {tareas_id}"
+            );
+
+            return Ok(results);
+        }
 
         [Authorize]
         [HttpPost("api/v1/comentarios/register")]
