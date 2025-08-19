@@ -69,7 +69,11 @@ builder.Services.AddSignalR();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
-    c.SwaggerDoc("v1", new OpenApiInfo { Title = "Solucion integral", Version = "v1" });
+    c.SwaggerDoc("general", new OpenApiInfo { Title = "Solucion integral", Version = "v1" });
+    c.SwaggerDoc("users", new OpenApiInfo { Title = "Users", Version = "v1" });
+    c.SwaggerDoc("scrum", new OpenApiInfo { Title = "Scrum", Version = "v1" });
+    c.SwaggerDoc("ventas", new OpenApiInfo { Title = "Ventas", Version = "v1" });
+    c.SwaggerDoc("subasta", new OpenApiInfo { Title = "Subasta", Version = "v1" });
     c.OperationFilter<FileUploadOperationFilter>();
 
     var securityScheme = new OpenApiSecurityScheme
@@ -100,7 +104,11 @@ var app = builder.Build();
 app.UseSwagger();
 app.UseSwaggerUI(c =>
 {
-    c.SwaggerEndpoint("/swagger/v1/swagger.json", "Solucion integral V1");
+    c.SwaggerEndpoint("/swagger/general/swagger.json", "Solucion integral v1");
+    c.SwaggerEndpoint("/swagger/users/swagger.json", "Users v1");
+    c.SwaggerEndpoint("/swagger/scrum/swagger.json", "Scrum v1");
+    c.SwaggerEndpoint("/swagger/ventas/swagger.json", "Ventas v1");
+    c.SwaggerEndpoint("/swagger/subasta/swagger.json", "Subasta v1");
     c.RoutePrefix = string.Empty; // Acceso a Swagger en la raíz
 });
 

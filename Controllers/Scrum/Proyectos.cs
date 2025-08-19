@@ -4,8 +4,12 @@ using MyApiProject.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Caching.Memory;
 
-namespace MyApiProject.Controllers
+namespace MyApiProject.Controllers.Scrum
 {
+
+    [ApiExplorerSettings(GroupName = "scrum")]
+    [Route("api/v1/proyectos")]
+    [ApiController]
     public partial class ProyectosController : BaseController
     {
         private readonly IMemoryCache _memoryCache;
@@ -17,16 +21,8 @@ namespace MyApiProject.Controllers
             _authUtils = authUtils;
         }
 
-        private int ObtenerUsuarioId()
-        {
-            int userId = GetUserIdFromToken();
-            if (userId == 0)
-                throw new UnauthorizedAccessException("Token no válido o no se pudo extraer el ID del usuario.");
-            return userId;
-        }
-
         [Authorize]
-        [HttpGet("api/v1/proyectos/consultar")]
+        [HttpGet("consultar")]
         public async Task<IActionResult> ConsultarProyects()
         {
             int userId;
@@ -75,7 +71,7 @@ namespace MyApiProject.Controllers
             return Ok(results);
         }
         [Authorize]
-        [HttpPost("api/v1/proyectos/register")]
+        [HttpPost("register")]
         public async Task<IActionResult> RegistrarProyectos([FromBody] Proyectos nuevoProyectos)
         {
             int userId = GetUserIdFromToken();
@@ -92,7 +88,7 @@ namespace MyApiProject.Controllers
         }
 
         [Authorize]
-        [HttpPut("api/v1/proyectos/update/{id}")]
+        [HttpPut("update/{id}")]
         public async Task<IActionResult> ActualizarProyectos(int id, [FromBody] ProyectosUpdate proyectosActualizado)
         {
             if (proyectosActualizado == null)
@@ -123,7 +119,7 @@ namespace MyApiProject.Controllers
         }
 
         [Authorize]
-        [HttpDelete("api/v1/proyectos/delete/{id}")]
+        [HttpDelete("delete/{id}")]
         public async Task<IActionResult> EliminarProyectos(int id)
         {
             string query = @"DELETE FROM proyectos WHERE Id = @Id";

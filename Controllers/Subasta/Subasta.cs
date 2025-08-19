@@ -5,23 +5,21 @@ using Microsoft.AspNetCore.Authorization;
 using Newtonsoft.Json;
 using Microsoft.Extensions.Caching.Memory;
 
-namespace MyApiProject.Controllers.Scrum
+namespace MyApiProject.Controllers.subasta
 {
-    [ApiExplorerSettings(GroupName = "scrum")]
-    [Route("api/v1/tareas")]
+    [ApiExplorerSettings(GroupName = "subasta")]
+    [Route("api/v1/subasta_compras")]
     [ApiController]
-    public partial class TareasController : BaseController
+    public partial class Subasta_ComprasController : BaseController
     {
         private readonly IMemoryCache _memoryCache;
         private readonly AuthUtils _authUtils;
-        private readonly ScrumUtils _scrumUtils;
 
-        public TareasController(IConfiguration configuration, IMemoryCache memoryCache, AuthUtils authUtils, ScrumUtils scrumUtils)
+        public Subasta_ComprasController(IConfiguration configuration, IMemoryCache memoryCache, AuthUtils authUtils)
             : base(configuration, memoryCache)
         {
             _memoryCache = memoryCache;
             _authUtils = authUtils;
-            _scrumUtils = scrumUtils;
         }
 
         [Authorize]
@@ -33,7 +31,7 @@ namespace MyApiProject.Controllers.Scrum
             catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); }
 
             // Clave única para cachear resultados de un sprint específico
-            string cacheKey = $"tareas_sprint_{sprint_id}";
+            string cacheKey = $"subasta_compras_sprint_{sprint_id}";
 
             // Si existe en cache, devolverlo
             if (_memoryCache.TryGetValue(cacheKey, out List<Dictionary<string, object>> cachedResults))
@@ -41,7 +39,7 @@ namespace MyApiProject.Controllers.Scrum
                 return Ok(cachedResults);
             }
 
-            string query = @"SELECT * FROM tareas WHERE sprint_id = @SprintId";
+            string query = @"SELECT * FROM subasta_compras WHERE sprint_id = @SprintId";
 
             await using var connection = await OpenConnectionAsync();
             await using var command = new SqlCommand(query, connection);
@@ -66,12 +64,6 @@ namespace MyApiProject.Controllers.Scrum
                 AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5)
             });
 
-            await _authUtils.InsertUserHistory(
-                userId,
-                "scrum load tasks",
-                $"Consulta de tareas para el sprint ID {sprint_id}"
-            );
-
             return Ok(results);
         }
 
@@ -85,7 +77,7 @@ namespace MyApiProject.Controllers.Scrum
 
             var insertResult = await InsertJsonToDatabaseAsync(
                 data: nuevoTarea,
-                tableName: "tareas"
+                tableName: "subasta_compras"
             );
 
             var tareaId = ExtraerIdDeResultado(insertResult);
@@ -96,14 +88,8 @@ namespace MyApiProject.Controllers.Scrum
                     "scrum upload task",
                     $"Registro de tarea -> {nuevoTarea.titulo}"
                 );
-
-                await _scrumUtils.RegistrarHistorialTareaAsync(
-                    tareaId.Value,
-                    $"Tarea registrada por el usuario con ID {userId}"
-                );
-
-                // Limpiar cache relacionado con tareas
-                _memoryCache.Remove($"tareas_sprint_{nuevoTarea.sprint_id}");
+                // Limpiar cache relacionado con subasta_compras
+                _memoryCache.Remove($"subasta_compras_sprint_{nuevoTarea.sprint_id}");
             }
 
             return insertResult;
@@ -122,12 +108,12 @@ namespace MyApiProject.Controllers.Scrum
 
             var updateResult = await UpdateJsonInDatabaseAsync(
                 data: tareaActualizado,
-                tableName: "tareas",
+                tableName: "subasta_compras",
                 keyColumn: "id",
                 keyValue: id,
                 preValidation: async (connection) =>
                 {
-                    const string checkQuery = "SELECT COUNT(1) FROM tareas WHERE id = @Id";
+                    const string checkQuery = "SELECT COUNT(1) FROM subasta_compras WHERE id = @Id";
                     await using var cmd = new SqlCommand(checkQuery, connection);
                     cmd.Parameters.AddWithValue("@Id", id);
                     var exists = (int)await cmd.ExecuteScalarAsync();
@@ -143,14 +129,9 @@ namespace MyApiProject.Controllers.Scrum
                     $"Actualización de tarea con ID {id}"
                 );
 
-                await _scrumUtils.RegistrarHistorialTareaAsync(
-                    id,
-                    $"Tarea actualizada por el usuario con ID {userId}"
-                );
-
-                // Invalidar todas las posibles cachés de tareas
+                // Invalidar todas las posibles cachés de subasta_compras
                 if (tareaActualizado.sprint_id.HasValue)
-                    _memoryCache.Remove($"tareas_sprint_{tareaActualizado.sprint_id.Value}");
+                    _memoryCache.Remove($"subasta_compras_sprint_{tareaActualizado.sprint_id.Value}");
             }
 
             return updateResult;
@@ -164,7 +145,7 @@ namespace MyApiProject.Controllers.Scrum
             try { userId = ObtenerUsuarioId(); }
             catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); }
 
-            string query = @"UPDATE tareas SET estado = 'archivado' WHERE Id = @Id";
+            string query = @"UPDATE subasta_compras SET estado = 'archivado' WHERE Id = @Id";
 
             try
             {
@@ -182,13 +163,8 @@ namespace MyApiProject.Controllers.Scrum
                         $"Eliminación de tarea con ID {id}"
                     );
 
-                    await _scrumUtils.RegistrarHistorialTareaAsync(
-                        id,
-                        $"Tarea archivada por el usuario con ID {userId}"
-                    );
-
-                    // Si quieres invalidar todas las cachés de tareas, puedes usar este patrón:
-                    // _memoryCache.Remove("tareas_sprint_" + sprint_id); // Si conoces el sprint
+                    // Si quieres invalidar todas las cachés de subasta_compras, puedes usar este patrón:
+                    // _memoryCache.Remove("subasta_compras_sprint_" + sprint_id); // Si conoces el sprint
                     // O invalidar globalmente si guardas una lista de claves
 
                     return Ok(new { Message = "Tarea eliminada exitosamente" });

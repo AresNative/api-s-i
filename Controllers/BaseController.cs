@@ -58,7 +58,25 @@ namespace MyApiProject.Controllers
 
             return 0; // Valor por defecto si no se encuentra el claim
         }
+        protected int ObtenerUsuarioId()
+        {
+            int userId = GetUserIdFromToken();
+            if (userId == 0)
+                throw new UnauthorizedAccessException("Token no válido o no se pudo extraer el ID del usuario.");
+            return userId;
+        }
 
+        protected static int? ExtraerIdDeResultado(IActionResult result)
+        {
+            if (result is OkObjectResult ok && ok.Value is not null)
+            {
+                var resultData = JsonConvert.DeserializeObject<dynamic>(
+                    JsonConvert.SerializeObject(ok.Value)
+                );
+                return (int?)resultData?.Id;
+            }
+            return null;
+        }
         protected async Task<IActionResult> InsertJsonToDatabaseAsync<T>(
             T data,
             string tableName,
@@ -146,7 +164,6 @@ namespace MyApiProject.Controllers
                 return HandleException(ex, $"Error al insertar en {tableName}.");
             }
         }
-
         protected async Task<IActionResult> UpdateJsonInDatabaseAsync<T>(
             T data,
             string tableName,

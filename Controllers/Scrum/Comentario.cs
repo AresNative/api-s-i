@@ -4,8 +4,11 @@ using MyApiProject.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Caching.Memory;
 
-namespace MyApiProject.Controllers
+namespace MyApiProject.Controllers.Scrum
 {
+    [ApiExplorerSettings(GroupName = "scrum")]
+    [Route("api/v1/comentarios")]
+    [ApiController]
     public partial class ComentariosController : BaseController
     {
         private readonly IMemoryCache _memoryCache;
@@ -17,15 +20,8 @@ namespace MyApiProject.Controllers
             _authUtils = authUtils;
         }
 
-        private int ObtenerUsuarioId()
-        {
-            int userId = GetUserIdFromToken();
-            if (userId == 0)
-                throw new UnauthorizedAccessException("Token no válido o no se pudo extraer el ID del usuario.");
-            return userId;
-        }
         [Authorize]
-        [HttpGet("api/v1/comentarios/consultar/{tareas_id}")]
+        [HttpGet("consultar/{tareas_id}")]
         public async Task<IActionResult> ConsultarComentarios(int tareas_id)
         {
             int userId;
@@ -76,7 +72,7 @@ namespace MyApiProject.Controllers
         }
 
         [Authorize]
-        [HttpPost("api/v1/comentarios/register")]
+        [HttpPost("register")]
         public async Task<IActionResult> RegistrarComentarios([FromBody] Comentarios nuevoComentarios)
         {
             int userId = GetUserIdFromToken();
@@ -93,7 +89,7 @@ namespace MyApiProject.Controllers
         }
 
         [Authorize]
-        [HttpPut("api/v1/comentarios/update/{id}")]
+        [HttpPut("update/{id}")]
         public async Task<IActionResult> ActualizarComentarios(int id, [FromBody] ComentariosUpdate comentariosActualizado)
         {
             if (comentariosActualizado == null)
@@ -124,7 +120,7 @@ namespace MyApiProject.Controllers
         }
 
         [Authorize]
-        [HttpDelete("api/v1/comentarios/delete/{id}")]
+        [HttpDelete("delete/{id}")]
         public async Task<IActionResult> EliminarComentarios(int id)
         {
             string query = @"DELETE FROM comentarios WHERE Id = @Id";

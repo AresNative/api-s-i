@@ -3,8 +3,10 @@ using Microsoft.Data.SqlClient;
 using MyApiProject.Models;
 using Microsoft.AspNetCore.Authorization;
 
-namespace MyApiProject.Controllers
+namespace MyApiProject.Controllers.users
 {
+
+    [ApiExplorerSettings(GroupName = "users")]
     public partial class UsuariosController : BaseController
     {
         private readonly AuthUtils _authUtils;

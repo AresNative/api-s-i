@@ -3,8 +3,11 @@ using Microsoft.Data.SqlClient;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Caching.Memory;
 
-namespace MyApiProject.Controllers
+namespace MyApiProject.Controllers.general
 {
+    [ApiExplorerSettings(GroupName = "general")]
+    [Route("api/v1/recursos")]
+    [ApiController]
     public partial class RecursosController : BaseController
     {
         private readonly IMemoryCache _memoryCache;
@@ -20,18 +23,10 @@ namespace MyApiProject.Controllers
             _authUtils = authUtils;
         }
 
-        private int ObtenerUsuarioId()
-        {
-            int userId = GetUserIdFromToken();
-            if (userId == 0)
-                throw new UnauthorizedAccessException("Token no válido o no se pudo extraer el ID del usuario.");
-            return userId;
-        }
-
         #region Endpoints para Imágenes
 
         [Authorize]
-        [HttpGet("api/v2/recursos/imagenes/{tabla}/{id_ref}")]
+        [HttpGet("imagenes/{tabla}/{id_ref}")]
         public async Task<IActionResult> ConsultarImagenes(string tabla, long id_ref)
         {
             int userId;
@@ -82,7 +77,7 @@ namespace MyApiProject.Controllers
         }
 
         [Authorize]
-        [HttpPost("api/v2/recursos/imagenes/upload")]
+        [HttpPost("imagenes/upload")]
         [Consumes("multipart/form-data")]
         public async Task<IActionResult> SubirImagen([FromForm] UploadRecursoRequest request)
         {
@@ -155,7 +150,7 @@ namespace MyApiProject.Controllers
         }
 
         [Authorize]
-        [HttpDelete("api/v2/recursos/imagenes/delete/{id}")]
+        [HttpDelete("imagenes/delete/{id}")]
         public async Task<IActionResult> EliminarImagen(long id)
         {
             int userId;
@@ -221,7 +216,7 @@ namespace MyApiProject.Controllers
         #region Endpoints para Archivos
 
         [Authorize]
-        [HttpGet("api/v2/recursos/archivos/{tabla}/{id_ref}")]
+        [HttpGet("archivos/{tabla}/{id_ref}")]
         public async Task<IActionResult> ConsultarArchivos(string tabla, long id_ref)
         {
             int userId;
@@ -272,7 +267,7 @@ namespace MyApiProject.Controllers
         }
 
         [Authorize]
-        [HttpPost("api/v2/recursos/archivos/upload")]
+        [HttpPost("archivos/upload")]
         [Consumes("multipart/form-data")]
         public async Task<IActionResult> SubirArchivo([FromForm] UploadRecursoRequest request)
         {
@@ -343,7 +338,7 @@ namespace MyApiProject.Controllers
         }
 
         [Authorize]
-        [HttpDelete("api/v2/recursos/archivos/delete/{id}")]
+        [HttpDelete("archivos/delete/{id}")]
         public async Task<IActionResult> EliminarArchivo(long id)
         {
             int userId;

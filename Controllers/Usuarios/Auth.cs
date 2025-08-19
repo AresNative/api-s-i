@@ -2,8 +2,9 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Memory;
 using MyApiProject.Models;
-namespace MyApiProject.Controllers
+namespace MyApiProject.Controllers.users
 {
+    [ApiExplorerSettings(GroupName = "users")]
     [ApiController]
     [Route("api/[controller]")]
     public class AuthController : BaseController
@@ -59,7 +60,6 @@ namespace MyApiProject.Controllers
             });
         }
 
-        [Authorize]
         [HttpPost("logout")]
         public async Task<IActionResult> Logout()
         {

@@ -5,35 +5,33 @@ using Microsoft.AspNetCore.Authorization;
 using Newtonsoft.Json;
 using Microsoft.Extensions.Caching.Memory;
 
-namespace MyApiProject.Controllers.Scrum
+namespace MyApiProject.Controllers.subasta
 {
-    [ApiExplorerSettings(GroupName = "scrum")]
-    [Route("api/v1/tareas")]
+    [ApiExplorerSettings(GroupName = "subasta")]
+    [Route("api/v1/ofertas_proveedores")]
     [ApiController]
-    public partial class TareasController : BaseController
+    public partial class Ofertas_ProveedoresController : BaseController
     {
         private readonly IMemoryCache _memoryCache;
         private readonly AuthUtils _authUtils;
-        private readonly ScrumUtils _scrumUtils;
 
-        public TareasController(IConfiguration configuration, IMemoryCache memoryCache, AuthUtils authUtils, ScrumUtils scrumUtils)
+        public Ofertas_ProveedoresController(IConfiguration configuration, IMemoryCache memoryCache, AuthUtils authUtils)
             : base(configuration, memoryCache)
         {
             _memoryCache = memoryCache;
             _authUtils = authUtils;
-            _scrumUtils = scrumUtils;
         }
 
         [Authorize]
-        [HttpGet("consultar/{sprint_id}")]
-        public async Task<IActionResult> ConsultarTarea(int sprint_id)
+        [HttpGet("consultar/{subasta_compra_id}")]
+        public async Task<IActionResult> ConsultarOfeta_Proveedores(int subasta_compra_id)
         {
             int userId;
             try { userId = ObtenerUsuarioId(); }
             catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); }
 
             // Clave única para cachear resultados de un sprint específico
-            string cacheKey = $"tareas_sprint_{sprint_id}";
+            string cacheKey = $"ofertas_proveedores_sprint_{subasta_compra_id}";
 
             // Si existe en cache, devolverlo
             if (_memoryCache.TryGetValue(cacheKey, out List<Dictionary<string, object>> cachedResults))
@@ -41,11 +39,11 @@ namespace MyApiProject.Controllers.Scrum
                 return Ok(cachedResults);
             }
 
-            string query = @"SELECT * FROM tareas WHERE sprint_id = @SprintId";
+            string query = @"SELECT * FROM ofertas_proveedores WHERE subasta_compra_id = @SprintId";
 
             await using var connection = await OpenConnectionAsync();
             await using var command = new SqlCommand(query, connection);
-            command.Parameters.AddWithValue("@SprintId", sprint_id);
+            command.Parameters.AddWithValue("@SprintId", subasta_compra_id);
 
             await using var reader = await command.ExecuteReaderAsync();
             var results = new List<Dictionary<string, object>>();
@@ -69,7 +67,7 @@ namespace MyApiProject.Controllers.Scrum
             await _authUtils.InsertUserHistory(
                 userId,
                 "scrum load tasks",
-                $"Consulta de tareas para el sprint ID {sprint_id}"
+                $"Consulta de ofertas_proveedores para el sprint ID {subasta_compra_id}"
             );
 
             return Ok(results);
@@ -77,33 +75,28 @@ namespace MyApiProject.Controllers.Scrum
 
         [Authorize]
         [HttpPost("register")]
-        public async Task<IActionResult> RegistrarTarea([FromBody] Tarea nuevoTarea)
+        public async Task<IActionResult> RegistrarOfeta_Proveedores([FromBody] Ofeta_Proveedores nuevoOfeta_Proveedores)
         {
             int userId;
             try { userId = ObtenerUsuarioId(); }
             catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); }
 
             var insertResult = await InsertJsonToDatabaseAsync(
-                data: nuevoTarea,
-                tableName: "tareas"
+                data: nuevoOfeta_Proveedores,
+                tableName: "ofertas_proveedores"
             );
 
-            var tareaId = ExtraerIdDeResultado(insertResult);
-            if (tareaId.HasValue && tareaId.Value > 0)
+            var ofeta_ProveedoresId = ExtraerIdDeResultado(insertResult);
+            if (ofeta_ProveedoresId.HasValue && ofeta_ProveedoresId.Value > 0)
             {
                 await _authUtils.InsertUserHistory(
                     userId,
                     "scrum upload task",
-                    $"Registro de tarea -> {nuevoTarea.titulo}"
+                    $"Registro de ofeta a subasta con ID {nuevoOfeta_Proveedores.subasta_compra_id}"
                 );
 
-                await _scrumUtils.RegistrarHistorialTareaAsync(
-                    tareaId.Value,
-                    $"Tarea registrada por el usuario con ID {userId}"
-                );
-
-                // Limpiar cache relacionado con tareas
-                _memoryCache.Remove($"tareas_sprint_{nuevoTarea.sprint_id}");
+                // Limpiar cache relacionado con ofertas_proveedores
+                _memoryCache.Remove($"ofertas_proveedores_sprint_{nuevoOfeta_Proveedores.subasta_compra_id}");
             }
 
             return insertResult;
@@ -111,27 +104,27 @@ namespace MyApiProject.Controllers.Scrum
 
         [Authorize]
         [HttpPut("update/{id}")]
-        public async Task<IActionResult> ActualizarTarea(int id, [FromBody] TareaUpdate tareaActualizado)
+        public async Task<IActionResult> ActualizarOfeta_Proveedores(int id, [FromBody] Ofeta_ProveedoresUpdate ofeta_proveedoresActualizado)
         {
-            if (tareaActualizado == null)
-                return BadRequest(new { Message = "Datos de tarea inválidos." });
+            if (ofeta_proveedoresActualizado == null)
+                return BadRequest(new { Message = "Datos de ofeta_Proveedores inválidos." });
 
             int userId;
             try { userId = ObtenerUsuarioId(); }
             catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); }
 
             var updateResult = await UpdateJsonInDatabaseAsync(
-                data: tareaActualizado,
-                tableName: "tareas",
+                data: ofeta_proveedoresActualizado,
+                tableName: "ofertas_proveedores",
                 keyColumn: "id",
                 keyValue: id,
                 preValidation: async (connection) =>
                 {
-                    const string checkQuery = "SELECT COUNT(1) FROM tareas WHERE id = @Id";
+                    const string checkQuery = "SELECT COUNT(1) FROM ofertas_proveedores WHERE id = @Id";
                     await using var cmd = new SqlCommand(checkQuery, connection);
                     cmd.Parameters.AddWithValue("@Id", id);
                     var exists = (int)await cmd.ExecuteScalarAsync();
-                    return exists == 0 ? NotFound(new { Message = "Tarea no encontrada." }) : null;
+                    return exists == 0 ? NotFound(new { Message = "Ofeta_Proveedores no encontrada." }) : null;
                 }
             );
 
@@ -140,17 +133,12 @@ namespace MyApiProject.Controllers.Scrum
                 await _authUtils.InsertUserHistory(
                     userId,
                     "scrum update task",
-                    $"Actualización de tarea con ID {id}"
+                    $"Actualización de ofeta con ID {id}"
                 );
 
-                await _scrumUtils.RegistrarHistorialTareaAsync(
-                    id,
-                    $"Tarea actualizada por el usuario con ID {userId}"
-                );
-
-                // Invalidar todas las posibles cachés de tareas
-                if (tareaActualizado.sprint_id.HasValue)
-                    _memoryCache.Remove($"tareas_sprint_{tareaActualizado.sprint_id.Value}");
+                // Invalidar todas las posibles cachés de ofertas_proveedores
+                if (ofeta_proveedoresActualizado.subasta_compra_id.HasValue)
+                    _memoryCache.Remove($"ofertas_proveedores_sprint_{ofeta_proveedoresActualizado.subasta_compra_id.Value}");
             }
 
             return updateResult;
@@ -158,13 +146,13 @@ namespace MyApiProject.Controllers.Scrum
 
         [Authorize]
         [HttpDelete("delete/{id}")]
-        public async Task<IActionResult> EliminarTarea(int id)
+        public async Task<IActionResult> EliminarOfeta_Proveedores(int id)
         {
             int userId;
             try { userId = ObtenerUsuarioId(); }
             catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); }
 
-            string query = @"UPDATE tareas SET estado = 'archivado' WHERE Id = @Id";
+            string query = @"UPDATE ofertas_proveedores SET estado = 'archivado' WHERE Id = @Id";
 
             try
             {
@@ -179,23 +167,17 @@ namespace MyApiProject.Controllers.Scrum
                     await _authUtils.InsertUserHistory(
                         userId,
                         "scrum delete task",
-                        $"Eliminación de tarea con ID {id}"
+                        $"Eliminación de ofeta con ID {id}"
                     );
-
-                    await _scrumUtils.RegistrarHistorialTareaAsync(
-                        id,
-                        $"Tarea archivada por el usuario con ID {userId}"
-                    );
-
-                    // Si quieres invalidar todas las cachés de tareas, puedes usar este patrón:
-                    // _memoryCache.Remove("tareas_sprint_" + sprint_id); // Si conoces el sprint
+                    // Si quieres invalidar todas las cachés de ofertas_proveedores, puedes usar este patrón:
+                    // _memoryCache.Remove("ofertas_proveedores_sprint_" + subasta_compra_id); // Si conoces el sprint
                     // O invalidar globalmente si guardas una lista de claves
 
-                    return Ok(new { Message = "Tarea eliminada exitosamente" });
+                    return Ok(new { Message = "Ofeta eliminada exitosamente" });
                 }
                 else
                 {
-                    return NotFound(new { Message = "Tarea no encontrada" });
+                    return NotFound(new { Message = "Ofeta no encontrada" });
                 }
             }
             catch (Exception ex)

@@ -4,8 +4,11 @@ using MyApiProject.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Caching.Memory;
 
-namespace MyApiProject.Controllers
+namespace MyApiProject.Controllers.Scrum
 {
+    [ApiExplorerSettings(GroupName = "scrum")]
+    [Route("api/v1/sprints")]
+    [ApiController]
     public partial class SprintsController : BaseController
     {
         private readonly IMemoryCache _memoryCache;
@@ -16,16 +19,9 @@ namespace MyApiProject.Controllers
             _memoryCache = memoryCache;
             _authUtils = authUtils;
         }
-        private int ObtenerUsuarioId()
-        {
-            int userId = GetUserIdFromToken();
-            if (userId == 0)
-                throw new UnauthorizedAccessException("Token no válido o no se pudo extraer el ID del usuario.");
-            return userId;
-        }
 
         [Authorize]
-        [HttpGet("api/v1/sprints/consultar/{proyecto_id}")]
+        [HttpGet("consultar/{proyecto_id}")]
         public async Task<IActionResult> ConsultarSprints(int proyecto_id)
         {
             int userId;
@@ -76,7 +72,7 @@ namespace MyApiProject.Controllers
         }
 
         [Authorize]
-        [HttpPost("api/v1/sprints/register")]
+        [HttpPost("register")]
         public async Task<IActionResult> RegistrarSprints([FromBody] Sprints nuevoSprints)
         {
             int userId = GetUserIdFromToken();
@@ -94,7 +90,7 @@ namespace MyApiProject.Controllers
         }
 
         [Authorize]
-        [HttpPut("api/v1/sprints/update/{id}")]
+        [HttpPut("update/{id}")]
         public async Task<IActionResult> ActualizarSprints(int id, [FromBody] SprintsUpdate sprintsActualizado)
         {
             if (sprintsActualizado == null)
@@ -125,7 +121,7 @@ namespace MyApiProject.Controllers
         }
 
         [Authorize]
-        [HttpDelete("api/v1/sprints/delete/{id}")]
+        [HttpDelete("delete/{id}")]
         public async Task<IActionResult> EliminarSprints(int id)
         {
             string query = @"DELETE FROM sprints WHERE Id = @Id";
