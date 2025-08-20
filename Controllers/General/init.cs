@@ -4,9 +4,9 @@ using Microsoft.AspNetCore.Authorization;
 using Newtonsoft.Json.Linq;
 using Microsoft.Extensions.Caching.Memory;
 
-namespace MyApiProject.Controllers.x
+namespace MyApiProject.Controllers.general
 {
-    [ApiExplorerSettings(GroupName = "x")]
+    [ApiExplorerSettings(GroupName = "general")]
     [Route("api/v1")]
     [ApiController]
     public partial class GeneralController : BaseController
@@ -103,10 +103,15 @@ namespace MyApiProject.Controllers.x
             try { userId = ObtenerUsuarioId(); }
             catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); }
 
-            var columns = string.Join(",", data.Properties().Select(p => p.Name));
-            var values = string.Join(",", data.Properties().Select(p => "@" + p.Name));
 
-            string query = $"INSERT INTO {table} ({columns}) OUTPUT INSERTED.id VALUES ({values})";
+            // 🔑 Construcción dinámica de columnas y parámetros
+            var columnNames = string.Join(", ", data.Properties().Select(p => $"[{p.Name}]"));
+            var parameterNames = string.Join(", ", data.Properties().Select(p => $"@{p.Name}"));
+
+            var query = $@"
+            INSERT INTO [{table}] ({columnNames})
+            OUTPUT INSERTED.id
+            VALUES ({parameterNames});";
 
             await using var connection = await OpenConnectionAsync();
             await using var command = new SqlCommand(query, connection);
@@ -161,6 +166,33 @@ namespace MyApiProject.Controllers.x
 
         // ✅ Eliminación lógica
         [Authorize]
+        [HttpDelete("archivar/{id}")]
+        public async Task<IActionResult> Archivar(int id, [FromQuery] string? table = "general")
+        {
+            int userId;
+            try { userId = ObtenerUsuarioId(); }
+            catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); }
+
+            string query = $"UPDATE {table} SET estado = 'archivado' WHERE id = @Id";
+
+            await using var connection = await OpenConnectionAsync();
+            await using var command = new SqlCommand(query, connection);
+            command.Parameters.AddWithValue("@Id", id);
+
+            var result = await command.ExecuteNonQueryAsync();
+
+            if (result > 0)
+            {
+                await _authUtils.InsertUserHistory(userId, "general delete", $"Archivado de documento en {table} con ID {id}");
+                _memoryCache.Remove($"general_{table}_{id}");
+                _memoryCache.Remove($"general_all_{table}");
+                return Ok(new { Message = "Registro eliminado exitosamente" });
+            }
+
+            return NotFound(new { Message = "Registro no encontrado" });
+        }
+        // ✅ Eliminación lógica
+        [Authorize]
         [HttpDelete("delete/{id}")]
         public async Task<IActionResult> Eliminar(int id, [FromQuery] string? table = "general")
         {
@@ -168,7 +200,7 @@ namespace MyApiProject.Controllers.x
             try { userId = ObtenerUsuarioId(); }
             catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); }
 
-            string query = $"UPDATE {table} SET estado = 'archivado' WHERE id = @Id";
+            string query = $"DELETE {table} WHERE id = @Id";
 
             await using var connection = await OpenConnectionAsync();
             await using var command = new SqlCommand(query, connection);
