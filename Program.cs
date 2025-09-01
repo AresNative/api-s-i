@@ -64,16 +64,27 @@ builder.Services.AddMemoryCache(); // Esto es necesario para resolver IMemoryCac
 
 // ↓↓↓ Agregar SignalR a los servicios ↓↓↓
 builder.Services.AddSignalR();
-
+var swaggerGroups = new[]
+{
+    new { Name = "general", Title = "Solucion integral" },
+    new { Name = "users",   Title = "Users" },
+    new { Name = "checador",Title = "Checador" },
+    new { Name = "scrum",   Title = "Scrum" },
+    new { Name = "ventas",  Title = "Ventas" },
+    new { Name = "subasta", Title = "Subasta" }
+};
 // Configuración de Swagger con seguridad JWT optimizada
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
-    c.SwaggerDoc("general", new OpenApiInfo { Title = "Solucion integral", Version = "v1" });
-    c.SwaggerDoc("users", new OpenApiInfo { Title = "Users", Version = "v1" });
-    c.SwaggerDoc("scrum", new OpenApiInfo { Title = "Scrum", Version = "v1" });
-    c.SwaggerDoc("ventas", new OpenApiInfo { Title = "Ventas", Version = "v1" });
-    c.SwaggerDoc("subasta", new OpenApiInfo { Title = "Subasta", Version = "v1" });
+    foreach (var group in swaggerGroups)
+    {
+        c.SwaggerDoc(group.Name, new OpenApiInfo
+        {
+            Title = group.Title,
+            Version = "v1"
+        });
+    }
     c.OperationFilter<FileUploadOperationFilter>();
 
     var securityScheme = new OpenApiSecurityScheme
@@ -104,11 +115,10 @@ var app = builder.Build();
 app.UseSwagger();
 app.UseSwaggerUI(c =>
 {
-    c.SwaggerEndpoint("/swagger/general/swagger.json", "Solucion integral v1");
-    c.SwaggerEndpoint("/swagger/users/swagger.json", "Users v1");
-    c.SwaggerEndpoint("/swagger/scrum/swagger.json", "Scrum v1");
-    c.SwaggerEndpoint("/swagger/ventas/swagger.json", "Ventas v1");
-    c.SwaggerEndpoint("/swagger/subasta/swagger.json", "Subasta v1");
+    foreach (var group in swaggerGroups)
+    {
+        c.SwaggerEndpoint($"/swagger/{group.Name}/swagger.json", $"{group.Title} v1");
+    }
     c.RoutePrefix = string.Empty; // Acceso a Swagger en la raíz
 });
 
