@@ -92,7 +92,7 @@ namespace MyApiProject.Controllers
                 string? filePath = null;
                 if (file != null)
                 {
-                    var uploadsFolder = Path.Combine(Directory.GetCurrentDirectory(), "uploads");
+                    var uploadsFolder = Path.Combine(Directory.GetCurrentDirectory(), "Uploads");
                     Directory.CreateDirectory(uploadsFolder);
 
                     var fileExtension = Path.GetExtension(file.FileName);

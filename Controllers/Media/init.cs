@@ -95,7 +95,7 @@ namespace MyApiProject.Controllers.general
                     return BadRequest("Tabla de referencia no válida");
 
                 // Guardar archivo
-                var uploadsPath = Path.Combine(Directory.GetCurrentDirectory(), "uploads", "imagenes");
+                var uploadsPath = Path.Combine(Directory.GetCurrentDirectory(), "Uploads", "imagenes");
                 Directory.CreateDirectory(uploadsPath);
 
                 var fileExtension = Path.GetExtension(request.File.FileName).ToLower();
@@ -285,7 +285,7 @@ namespace MyApiProject.Controllers.general
                     return BadRequest("Tabla de referencia no válida");
 
                 // Guardar archivo
-                var uploadsPath = Path.Combine(Directory.GetCurrentDirectory(), "uploads", "archivos");
+                var uploadsPath = Path.Combine(Directory.GetCurrentDirectory(), "Uploads", "archivos");
                 Directory.CreateDirectory(uploadsPath);
 
                 var fileExtension = Path.GetExtension(request.File.FileName);

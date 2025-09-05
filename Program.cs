@@ -71,6 +71,7 @@ var swaggerGroups = new[]
     new { Name = "checador",Title = "Checador" },
     new { Name = "scrum",   Title = "Scrum" },
     new { Name = "ventas",  Title = "Ventas" },
+    new { Name = "proveedores", Title = "Proveedores" },
     new { Name = "subasta", Title = "Subasta" }
 };
 // Configuración de Swagger con seguridad JWT optimizada

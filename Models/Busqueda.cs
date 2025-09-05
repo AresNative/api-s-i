@@ -20,5 +20,8 @@ namespace MyApiProject.Models
         public string? Key { get; set; }
         public string? Direction { get; set; }  // "ASC" o "DESC"
     }
-
+    public class FiltrosRequest
+    {
+        public List<BusquedaParams> Filtros { get; set; } = new();
+    }
 }

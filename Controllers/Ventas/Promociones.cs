@@ -5,37 +5,36 @@ using Newtonsoft.Json.Linq;
 using Microsoft.Extensions.Caching.Memory;
 using MyApiProject.Models;
 
-namespace MyApiProject.Controllers.checador
+namespace MyApiProject.Controllers.ventas
 {
-    [ApiExplorerSettings(GroupName = "checador")]
-    [Route("api/v1/jornadas")]
+    [ApiExplorerSettings(GroupName = "ventas")]
+    [Route("api/v1/promociones")]
     [ApiController]
-    public partial class JornadasController : BaseController
+    public partial class PromocionesController : BaseController
     {
         private readonly IMemoryCache _memoryCache;
         private readonly AuthUtils _authUtils;
 
-        public JornadasController(IConfiguration configuration, IMemoryCache memoryCache, AuthUtils authUtils)
-            : base(configuration, memoryCache)
+        public PromocionesController(IConfiguration configuration, IMemoryCache memoryCache, AuthUtils authUtils) : base(configuration, memoryCache)
         {
             _memoryCache = memoryCache;
             _authUtils = authUtils;
         }
 
-        // ✅ Consulta jornadas (sin ID)
+        // ✅ Consulta promociones (sin ID)
         [Authorize]
         [HttpGet("consultar")]
-        public async Task<IActionResult> ConsultarJornadas()
+        public async Task<IActionResult> ConsultarPromociones()
         {
             int userId;
             try { userId = ObtenerUsuarioId(); }
             catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); }
 
-            string cacheKey = $"jornadas_all";
+            string cacheKey = $"promociones_all";
             if (_memoryCache.TryGetValue(cacheKey, out List<Dictionary<string, object>> cachedResults))
                 return Ok(cachedResults);
 
-            string query = $"SELECT * FROM jornadas";
+            string query = $"SELECT * FROM promociones";
 
             await using var connection = await OpenConnectionAsync();
             await using var command = new SqlCommand(query, connection);
@@ -53,7 +52,7 @@ namespace MyApiProject.Controllers.checador
 
             _memoryCache.Set(cacheKey, results, TimeSpan.FromMinutes(5));
 
-            await _authUtils.InsertUserHistory(userId, "jornadas load all", $"Consulta de todos los registros en jornadas");
+            await _authUtils.InsertUserHistory(userId, "promociones load all", $"Consulta de todos los registros en promociones");
             return Ok(results);
         }
 
@@ -66,11 +65,11 @@ namespace MyApiProject.Controllers.checador
             try { userId = ObtenerUsuarioId(); }
             catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); }
 
-            string cacheKey = $"jornadas_{id}";
+            string cacheKey = $"promociones_{id}";
             if (_memoryCache.TryGetValue(cacheKey, out List<Dictionary<string, object>> cachedResults))
                 return Ok(cachedResults);
 
-            string query = $"SELECT * FROM jornadas WHERE id = @ID";
+            string query = $"SELECT * FROM promociones WHERE id = @ID";
 
             await using var connection = await OpenConnectionAsync();
             await using var command = new SqlCommand(query, connection);
@@ -88,14 +87,14 @@ namespace MyApiProject.Controllers.checador
             }
 
             _memoryCache.Set(cacheKey, results, TimeSpan.FromMinutes(5));
-            await _authUtils.InsertUserHistory(userId, "jornadas load by id", $"Consulta en jornadas con ID {id}");
+            await _authUtils.InsertUserHistory(userId, "promociones load by id", $"Consulta en promociones con ID {id}");
 
             return Ok(results);
         }
 
         [Authorize]
         [HttpPost("consultar/filtros")]
-        public async Task<IActionResult> ConsultarJornadasConFiltros(
+        public async Task<IActionResult> ConsultarPromocionesConFiltros(
                     [FromBody] FiltrosRequest request,
                     [FromQuery] int page = 1,
                     [FromQuery] int pageSize = 10)
@@ -109,7 +108,7 @@ namespace MyApiProject.Controllers.checador
 
             int offset = (page - 1) * pageSize;
 
-            var baseQuery = @"FROM jornadas";
+            var baseQuery = @"FROM promociones";
             var whereClauses = new List<string>();
             var parameters = new List<SqlParameter>();
 
@@ -193,11 +192,11 @@ namespace MyApiProject.Controllers.checador
                     .Where(f => !string.IsNullOrWhiteSpace(f.Value))
                     .Select(f => $"{f.Key}_{f.Value}_{f.Operator}"));
 
-                var cacheKey = $"jornadas_filtros_{filtrosCacheKey}_page{page}_size{pageSize}";
+                var cacheKey = $"promociones_filtros_{filtrosCacheKey}_page{page}_size{pageSize}";
                 _memoryCache.Set(cacheKey, results, TimeSpan.FromMinutes(5));
 
-                await _authUtils.InsertUserHistory(userId, "jornadas load with filters",
-                    $"Consulta en jornadas con {request.Filtros.Count} filtros, página {page}, tamaño {pageSize}");
+                await _authUtils.InsertUserHistory(userId, "promociones load with filters",
+                    $"Consulta en promociones con {request.Filtros.Count} filtros, página {page}, tamaño {pageSize}");
 
                 return Ok(new
                 {
@@ -210,7 +209,7 @@ namespace MyApiProject.Controllers.checador
             }
             catch (Exception ex)
             {
-                await _authUtils.InsertUserHistory(userId, "jornadas error",
+                await _authUtils.InsertUserHistory(userId, "promociones error",
                     $"Error en consulta con filtros: {ex.Message}");
                 return StatusCode(500, new { Message = "Error interno del servidor", Details = ex.Message });
             }
@@ -232,7 +231,7 @@ namespace MyApiProject.Controllers.checador
             var parameterNames = string.Join(", ", data.Properties().Select(p => $"@{p.Name}"));
 
             var query = $@"
-            INSERT INTO [jornadas] ({columnNames})
+            INSERT INTO [promociones] ({columnNames})
             OUTPUT INSERTED.id
             VALUES ({parameterNames});";
 
@@ -246,8 +245,8 @@ namespace MyApiProject.Controllers.checador
 
             if (insertedId != null)
             {
-                await _authUtils.InsertUserHistory(userId, "jornadas insert", $"Registro en jornadas con ID {insertedId}");
-                _memoryCache.Remove($"jornadas_all");
+                await _authUtils.InsertUserHistory(userId, "promociones insert", $"Registro en promociones con ID {insertedId}");
+                _memoryCache.Remove($"promociones_all");
             }
 
             return Ok(new { Message = "Registro exitoso", Id = insertedId });
@@ -265,7 +264,7 @@ namespace MyApiProject.Controllers.checador
             catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); }
 
             var setClause = string.Join(",", data.Properties().Select(p => $"{p.Name} = @{p.Name}"));
-            string query = $"UPDATE jornadas SET {setClause} WHERE id = @Id";
+            string query = $"UPDATE promociones SET {setClause} WHERE id = @Id";
 
             await using var connection = await OpenConnectionAsync();
             await using var command = new SqlCommand(query, connection);
@@ -278,9 +277,9 @@ namespace MyApiProject.Controllers.checador
 
             if (result > 0)
             {
-                await _authUtils.InsertUserHistory(userId, "jornadas update", $"Actualización en jornadas con ID {id}");
-                _memoryCache.Remove($"jornadas_{id}");
-                _memoryCache.Remove($"jornadas_all");
+                await _authUtils.InsertUserHistory(userId, "promociones update", $"Actualización en promociones con ID {id}");
+                _memoryCache.Remove($"promociones_{id}");
+                _memoryCache.Remove($"promociones_all");
                 return Ok(new { Message = "Actualización exitosa" });
             }
 
@@ -296,7 +295,7 @@ namespace MyApiProject.Controllers.checador
             try { userId = ObtenerUsuarioId(); }
             catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); }
 
-            string query = $"UPDATE jornadas SET estado = 'archivado' WHERE id = @Id";
+            string query = $"UPDATE promociones SET estado = 'archivado' WHERE id = @Id";
 
             await using var connection = await OpenConnectionAsync();
             await using var command = new SqlCommand(query, connection);
@@ -306,9 +305,9 @@ namespace MyApiProject.Controllers.checador
 
             if (result > 0)
             {
-                await _authUtils.InsertUserHistory(userId, "jornadas delete", $"Archivado de documento en jornadas con ID {id}");
-                _memoryCache.Remove($"jornadas_{id}");
-                _memoryCache.Remove($"jornadas_all");
+                await _authUtils.InsertUserHistory(userId, "promociones delete", $"Archivado de documento en promociones con ID {id}");
+                _memoryCache.Remove($"promociones_{id}");
+                _memoryCache.Remove($"promociones_all");
                 return Ok(new { Message = "Registro eliminado exitosamente" });
             }
 
@@ -323,7 +322,7 @@ namespace MyApiProject.Controllers.checador
             try { userId = ObtenerUsuarioId(); }
             catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); }
 
-            string query = $"DELETE jornadas WHERE id = @Id";
+            string query = $"DELETE promociones WHERE id = @Id";
 
             await using var connection = await OpenConnectionAsync();
             await using var command = new SqlCommand(query, connection);
@@ -333,9 +332,9 @@ namespace MyApiProject.Controllers.checador
 
             if (result > 0)
             {
-                await _authUtils.InsertUserHistory(userId, "jornadas delete", $"Eliminación en jornadas con ID {id}");
-                _memoryCache.Remove($"jornadas_{id}");
-                _memoryCache.Remove($"jornadas_all");
+                await _authUtils.InsertUserHistory(userId, "promociones delete", $"Eliminación en promociones con ID {id}");
+                _memoryCache.Remove($"promociones_{id}");
+                _memoryCache.Remove($"promociones_all");
                 return Ok(new { Message = "Registro eliminado exitosamente" });
             }
 
