@@ -96,9 +96,9 @@ namespace MyApiProject.Controllers.ventas
         [Authorize]
         [HttpPost("consultar/filtros")]
         public async Task<IActionResult> ConsultarCombosConFiltros(
-                    [FromBody] FiltrosRequest request,
-                    [FromQuery] int page = 1,
-                    [FromQuery] int pageSize = 10)
+            [FromBody] FiltrosRequest request,
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 10)
         {
             int userId;
             try { userId = ObtenerUsuarioId(); }
@@ -112,33 +112,17 @@ namespace MyApiProject.Controllers.ventas
             var baseQuery = @"FROM combos";
             var whereClauses = new List<string>();
             var parameters = new List<SqlParameter>();
+            var parameterCounters = new Dictionary<string, int>();
 
-            // Procesar filtros
-            foreach (var filter in request.Filtros)
-            {
-                if (!string.IsNullOrWhiteSpace(filter.Value))
-                {
-                    var columnName = filter.Key;
-                    var parameterName = $"@{filter.Key.Replace(".", "_")}";
+            // Procesar filtros usando el método BuildFilters
+            BuildFilters(request, whereClauses, parameters, parameterCounters);
 
-                    string operatorClause = filter.Operator?.ToLower() switch
-                    {
-                        "like" => "LIKE",
-                        "=" => "=",
-                        ">=" => ">=",
-                        "<=" => "<=",
-                        ">" => ">",
-                        "<" => "<",
-                        "<>" => "<>",
-                        _ => "LIKE"
-                    };
+            // Agrupar condiciones para el mismo campo con OR
+            var groupedWhereClauses = AgruparCondiciones(whereClauses);
 
-                    whereClauses.Add($"{columnName} {operatorClause} {parameterName}");
-                    parameters.Add(new SqlParameter(parameterName, operatorClause == "LIKE" ? $"%{filter.Value}%" : filter.Value));
-                }
-            }
-
-            var whereQuery = whereClauses.Any() ? $"WHERE {string.Join(" AND ", whereClauses)}" : "";
+            var whereQuery = groupedWhereClauses.Any()
+                ? $"WHERE {string.Join(" AND ", groupedWhereClauses)}"
+                : "";
 
             var countQuery = $@"SELECT COUNT(*) AS TotalRegistros {baseQuery} {whereQuery}";
 

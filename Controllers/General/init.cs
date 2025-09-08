@@ -151,9 +151,9 @@ namespace MyApiProject.Controllers.general
 
                 paginatedParameters.AddRange(new[]
                 {
-            new SqlParameter("@Offset", offset),
-            new SqlParameter("@PageSize", pageSize)
-        });
+                    new SqlParameter("@Offset", offset),
+                    new SqlParameter("@PageSize", pageSize)
+                });
 
                 await using var command = new SqlCommand(paginatedQuery, connection);
                 command.Parameters.AddRange(paginatedParameters.ToArray());
