@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Caching.Memory;
+using MyApiProject.Models;
 using Newtonsoft.Json;
 
 namespace MyApiProject.Controllers
@@ -217,6 +218,92 @@ namespace MyApiProject.Controllers
                 return HandleException(ex);
             }
         }
+        // Métodos agregados
+        protected void BuildFilters(FiltrosRequest request, List<string> whereClauses, List<SqlParameter> parameters,
+                            Dictionary<string, int> parameterCounters)
+        {
+            var fechaParams = request.Filtros.Where(f => f.Key == "Fecha").ToList();
+            bool fechaRangeProcessed = false;
 
+            if (fechaParams.Count == 2)
+            {
+                var minFecha = fechaParams.FirstOrDefault(f => f.Operator == ">=");
+                var maxFecha = fechaParams.FirstOrDefault(f => f.Operator == "<=");
+
+                if (minFecha != null && maxFecha != null)
+                {
+                    whereClauses.Add("Fecha BETWEEN @FechaMin AND @FechaMax");
+                    parameters.Add(new SqlParameter("@FechaMin", DateTime.Parse(minFecha.Value)));
+                    parameters.Add(new SqlParameter("@FechaMax", DateTime.Parse(maxFecha.Value)));
+                    fechaRangeProcessed = true;
+                }
+            }
+
+            foreach (var filter in request.Filtros)
+            {
+                string operatorClause = filter.Operator?.ToLower() switch
+                {
+                    "like" => "LIKE",
+                    "=" => "=",
+                    ">=" => ">=",
+                    "<=" => "<=",
+                    ">" => ">",
+                    "<" => "<",
+                    "<>" => "<>",
+                    _ => "LIKE"
+                };
+
+                if (fechaRangeProcessed && filter.Key == "Fecha") continue;
+
+                if (!string.IsNullOrWhiteSpace(filter.Value))
+                {
+                    var column = filter.Key;
+                    if (!parameterCounters.ContainsKey(column))
+                        parameterCounters[column] = 0;
+                    else
+                        parameterCounters[column]++;
+
+                    var paramName = $"@{column}_{parameterCounters[column]}";
+                    whereClauses.Add($"{column} {operatorClause} {paramName}");
+
+                    parameters.Add(new SqlParameter(paramName, operatorClause == "LIKE" ? $"%{filter.Value}%" : filter.Value));
+                }
+            }
+        }
+
+        protected List<string> AgruparCondiciones(List<string> whereClauses)
+        {
+            var dict = new Dictionary<string, List<string>>();
+
+            foreach (var clause in whereClauses)
+            {
+                var key = clause.Split(' ', 2)[0]; // Tomamos la primera palabra como clave
+                if (!dict.ContainsKey(key))
+                    dict[key] = new List<string>();
+                dict[key].Add(clause);
+            }
+
+            return dict.Select(kvp =>
+                kvp.Value.Count > 1
+                    ? $"({string.Join(" OR ", kvp.Value)})"
+                    : kvp.Value.First()
+            ).ToList();
+        }
+
+        protected async Task<string> GuardarArchivo(IFormFile archivo)
+        {
+            var uploadsFolder = Path.Combine(Directory.GetCurrentDirectory(), "uploads/listas");
+            Directory.CreateDirectory(uploadsFolder);
+
+            var uniqueFileName = $"{Guid.NewGuid()}{Path.GetExtension(archivo.FileName)}";
+            var filePath = Path.Combine(uploadsFolder, uniqueFileName);
+
+            await using (var stream = new FileStream(filePath, FileMode.Create))
+            {
+                await archivo.CopyToAsync(stream);
+            }
+
+            return filePath;
+        }
     }
 }

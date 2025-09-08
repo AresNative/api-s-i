@@ -3,6 +3,7 @@ using Microsoft.Data.SqlClient;
 using Microsoft.AspNetCore.Authorization;
 using Newtonsoft.Json.Linq;
 using Microsoft.Extensions.Caching.Memory;
+using MyApiProject.Models;
 
 namespace MyApiProject.Controllers.general
 {
@@ -55,7 +56,6 @@ namespace MyApiProject.Controllers.general
             await _authUtils.InsertUserHistory(userId, "general load all", $"Consulta de todos los registros en {table}");
             return Ok(results);
         }
-
         // ✅ Consulta por ID
         [Authorize]
         [HttpGet("consultar/{id}")]
@@ -91,7 +91,113 @@ namespace MyApiProject.Controllers.general
 
             return Ok(results);
         }
+        [Authorize]
+        [HttpPost("consultar/filtros")]
+        public async Task<IActionResult> ConsultarGeneralConFiltros(
+                            [FromBody] FiltrosRequest request,
+                            [FromQuery] string? table = "general",
+                            [FromQuery] int page = 1,
+                            [FromQuery] int pageSize = 10)
+        {
+            int userId;
+            try { userId = ObtenerUsuarioId(); }
+            catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); }
 
+            if (page <= 0) page = 1;
+            if (pageSize <= 0) pageSize = 10;
+
+            int offset = (page - 1) * pageSize;
+
+            var baseQuery = $"FROM {table}";
+            var whereClauses = new List<string>();
+            var parameters = new List<SqlParameter>();
+            var parameterCounters = new Dictionary<string, int>();
+
+            // Procesar filtros usando el método BuildFilters
+            BuildFilters(request, whereClauses, parameters, parameterCounters);
+
+            // Agrupar condiciones para el mismo campo con OR
+            var groupedWhereClauses = AgruparCondiciones(whereClauses);
+
+            var whereQuery = groupedWhereClauses.Any()
+                ? $"WHERE {string.Join(" AND ", groupedWhereClauses)}"
+                : "";
+
+            var countQuery = $@"SELECT COUNT(*) AS TotalRegistros {baseQuery} {whereQuery}";
+
+            var paginatedQuery = $@"
+                SELECT *
+                {baseQuery} {whereQuery}
+                ORDER BY id
+                OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY";
+
+            try
+            {
+                await using var connection = await OpenConnectionAsync();
+
+                // Total records
+                var countCommandParameters = parameters
+                    .Select(p => new SqlParameter(p.ParameterName, p.Value))
+                    .ToList();
+
+                await using var countCommand = new SqlCommand(countQuery, connection);
+                countCommand.Parameters.AddRange(countCommandParameters.ToArray());
+                var totalRecords = (int)await countCommand.ExecuteScalarAsync();
+
+                // Paginated data
+                var paginatedParameters = parameters
+                    .Select(p => new SqlParameter(p.ParameterName, p.Value))
+                    .ToList();
+
+                paginatedParameters.AddRange(new[]
+                {
+            new SqlParameter("@Offset", offset),
+            new SqlParameter("@PageSize", pageSize)
+        });
+
+                await using var command = new SqlCommand(paginatedQuery, connection);
+                command.Parameters.AddRange(paginatedParameters.ToArray());
+
+                var results = new List<Dictionary<string, object>>();
+
+                await using var reader = await command.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                {
+                    var row = new Dictionary<string, object>();
+                    for (int i = 0; i < reader.FieldCount; i++)
+                    {
+                        row[reader.GetName(i)] = reader.GetValue(i);
+                    }
+                    results.Add(row);
+                }
+
+                // Crear clave de caché única basada en los filtros
+                var filtrosCacheKey = string.Join("_", request.Filtros
+                    .Where(f => !string.IsNullOrWhiteSpace(f.Value))
+                    .Select(f => $"{f.Key}_{f.Value}_{f.Operator}"));
+
+                var cacheKey = $"general_filtros_{filtrosCacheKey}_page{page}_size{pageSize}";
+                _memoryCache.Set(cacheKey, results, TimeSpan.FromMinutes(5));
+
+                await _authUtils.InsertUserHistory(userId, "general load with filters",
+                    $"Consulta en general con {request.Filtros.Count} filtros, página {page}, tamaño {pageSize}");
+
+                return Ok(new
+                {
+                    TotalRecords = totalRecords,
+                    TotalPages = (int)Math.Ceiling(totalRecords / (double)pageSize),
+                    PageSize = pageSize,
+                    Page = page,
+                    Data = results
+                });
+            }
+            catch (Exception ex)
+            {
+                await _authUtils.InsertUserHistory(userId, "general error",
+                    $"Error en consulta con filtros: {ex.Message}");
+                return StatusCode(500, new { Message = "Error interno del servidor", Details = ex.Message });
+            }
+        }
         // ✅ Registro dinámico con JSON
         [Authorize]
         [HttpPost("register")]

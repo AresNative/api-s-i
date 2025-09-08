@@ -23,5 +23,7 @@ namespace MyApiProject.Models
     public class FiltrosRequest
     {
         public List<BusquedaParams> Filtros { get; set; } = new();
+        public List<SumaParams> Selects { get; set; } = new();
+        public List<OrderParams> Order { get; set; } = new();
     }
 }
