@@ -188,16 +188,6 @@ public class FilterUtils
         }
         return false;
     }
-
-    public string GetSelectColumns(List<SumaParams> selects)
-    {
-        if (selects == null) return string.Empty;
-
-        return string.Join(", ", selects
-            .Where(s => s != null && !string.IsNullOrWhiteSpace(s.Key))
-            .Select(s => s.Key));
-    }
-
     public List<string> GroupConditions(List<string> whereClauses)
     {
         return whereClauses

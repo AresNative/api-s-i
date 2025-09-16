@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using MyApiProject.Hubs;
@@ -16,7 +17,9 @@ builder.Services.AddCors(options =>
     {
         policy.WithOrigins(allowedCorsOrigins)
               .AllowAnyHeader()
-              .AllowAnyMethod();
+              .AllowAnyMethod() // Esto permite PUT y DELETE
+              .AllowCredentials()// Si usas cookies o autenticación
+              .SetPreflightMaxAge(TimeSpan.FromSeconds(86400)); // Cache preflight
     });
 });
 
@@ -51,7 +54,11 @@ builder.Services.AddControllers()
         options.SerializerSettings.MaxDepth = 64; // Limita la profundidad para evitar sobrecarga
         options.SerializerSettings.Error = (sender, args) => args.ErrorContext.Handled = true;
     });
-
+// Agregar esta configuración para APIs
+builder.Services.Configure<ApiBehaviorOptions>(options =>
+{
+    options.SuppressModelStateInvalidFilter = true;
+});
 // Registro de servicios
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<AuthUtils>();
@@ -72,7 +79,8 @@ var swaggerGroups = new[]
     new { Name = "scrum",   Title = "Scrum" },
     new { Name = "ventas",  Title = "Ventas" },
     new { Name = "proveedores", Title = "Proveedores" },
-    new { Name = "subasta", Title = "Subasta" }
+    new { Name = "subasta", Title = "Subasta" },
+    new { Name = "i_sync", Title = "I-Sync" }
 };
 // Configuración de Swagger con seguridad JWT optimizada
 builder.Services.AddEndpointsApiExplorer();

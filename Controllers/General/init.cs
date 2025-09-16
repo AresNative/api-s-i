@@ -52,10 +52,10 @@ namespace MyApiProject.Controllers.general
             }
 
             _memoryCache.Set(cacheKey, results, TimeSpan.FromMinutes(5));
-
             await _authUtils.InsertUserHistory(userId, "general load all", $"Consulta de todos los registros en {table}");
             return Ok(results);
         }
+
         // ✅ Consulta por ID
         [Authorize]
         [HttpGet("consultar/{id}")]
@@ -88,16 +88,16 @@ namespace MyApiProject.Controllers.general
 
             _memoryCache.Set(cacheKey, results, TimeSpan.FromMinutes(5));
             await _authUtils.InsertUserHistory(userId, "general load by id", $"Consulta en {table} con ID {id}");
-
             return Ok(results);
         }
+
         [Authorize]
         [HttpPost("consultar/filtros")]
         public async Task<IActionResult> ConsultarGeneralConFiltros(
-                            [FromBody] FiltrosRequest request,
-                            [FromQuery] string? table = "general",
-                            [FromQuery] int page = 1,
-                            [FromQuery] int pageSize = 10)
+            [FromBody] FiltrosRequest request,
+            [FromQuery] string? table = "general",
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 10)
         {
             int userId;
             try { userId = ObtenerUsuarioId(); }
@@ -108,28 +108,54 @@ namespace MyApiProject.Controllers.general
 
             int offset = (page - 1) * pageSize;
 
+            // Construir la cláusula SELECT y GROUP BY
+            var (selectClause, groupByClause) = BuildSelectClause(request);
             var baseQuery = $"FROM {table}";
             var whereClauses = new List<string>();
             var parameters = new List<SqlParameter>();
             var parameterCounters = new Dictionary<string, int>();
 
-            // Procesar filtros usando el método BuildFilters
+            // Procesar filtros
             BuildFilters(request, whereClauses, parameters, parameterCounters);
 
-            // Agrupar condiciones para el mismo campo con OR
+            // Agrupar condiciones
             var groupedWhereClauses = AgruparCondiciones(whereClauses);
 
             var whereQuery = groupedWhereClauses.Any()
                 ? $"WHERE {string.Join(" AND ", groupedWhereClauses)}"
                 : "";
 
-            var countQuery = $@"SELECT COUNT(*) AS TotalRegistros {baseQuery} {whereQuery}";
+            // Construir ORDER BY
+            string orderByClause = BuildOrderByClause(request);
 
-            var paginatedQuery = $@"
-                SELECT *
-                {baseQuery} {whereQuery}
-                ORDER BY id
-                OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY";
+            // Query para contar (usando subquery para evitar problemas con GROUP BY)
+            var countQuery = $@"
+                SELECT COUNT(*) AS TotalRegistros 
+                FROM (
+                    SELECT {GetGroupByColumnsForCount(request)}
+                    {baseQuery} {whereQuery}
+                    {(string.IsNullOrEmpty(groupByClause) ? "" : groupByClause)}
+                ) AS CountTable";
+
+            // Construir query principal de manera más segura
+            var queryBuilder = new System.Text.StringBuilder();
+            queryBuilder.Append($"SELECT {selectClause} ");
+            queryBuilder.Append($"{baseQuery} ");
+
+            if (!string.IsNullOrEmpty(whereQuery))
+                queryBuilder.Append($"{whereQuery} ");
+
+            if (!string.IsNullOrEmpty(groupByClause))
+                queryBuilder.Append($"{groupByClause} ");
+
+            if (string.IsNullOrEmpty(orderByClause))
+                queryBuilder.Append("ORDER BY id ");
+            else
+                queryBuilder.Append($"{orderByClause} ");
+
+            queryBuilder.Append("OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY");
+
+            var paginatedQuery = queryBuilder.ToString();
 
             try
             {
@@ -171,16 +197,18 @@ namespace MyApiProject.Controllers.general
                     results.Add(row);
                 }
 
-                // Crear clave de caché única basada en los filtros
-                var filtrosCacheKey = string.Join("_", request.Filtros
-                    .Where(f => !string.IsNullOrWhiteSpace(f.Value))
+                // Cache
+                var validFiltros = request.Filtros
+                    .Where(f => !string.IsNullOrWhiteSpace(f.Key) && !string.IsNullOrWhiteSpace(f.Value))
+                    .ToList();
+
+                var filtrosCacheKey = string.Join("_", validFiltros
                     .Select(f => $"{f.Key}_{f.Value}_{f.Operator}"));
 
                 var cacheKey = $"general_filtros_{filtrosCacheKey}_page{page}_size{pageSize}";
                 _memoryCache.Set(cacheKey, results, TimeSpan.FromMinutes(5));
-
                 await _authUtils.InsertUserHistory(userId, "general load with filters",
-                    $"Consulta en general con {request.Filtros.Count} filtros, página {page}, tamaño {pageSize}");
+                                    $"Consulta en general con {request.Filtros.Count} filtros, página {page}, tamaño {pageSize}");
 
                 return Ok(new
                 {
@@ -198,7 +226,8 @@ namespace MyApiProject.Controllers.general
                 return StatusCode(500, new { Message = "Error interno del servidor", Details = ex.Message });
             }
         }
-        // ✅ Registro dinámico con JSON
+
+        // ✅ Registro dinámico con JSON - CORREGIDO: Devuelve todos los datos insertados
         [Authorize]
         [HttpPost("register")]
         public async Task<IActionResult> Registrar([FromBody] JObject data, [FromQuery] string? table = "general")
@@ -209,14 +238,14 @@ namespace MyApiProject.Controllers.general
             try { userId = ObtenerUsuarioId(); }
             catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); }
 
-
             // 🔑 Construcción dinámica de columnas y parámetros
             var columnNames = string.Join(", ", data.Properties().Select(p => $"[{p.Name}]"));
             var parameterNames = string.Join(", ", data.Properties().Select(p => $"@{p.Name}"));
 
+            // Query modificada para devolver todos los campos insertados
             var query = $@"
             INSERT INTO [{table}] ({columnNames})
-            OUTPUT INSERTED.id
+            OUTPUT INSERTED.*
             VALUES ({parameterNames});";
 
             await using var connection = await OpenConnectionAsync();
@@ -225,18 +254,29 @@ namespace MyApiProject.Controllers.general
             foreach (var prop in data.Properties())
                 command.Parameters.AddWithValue("@" + prop.Name, prop.Value?.ToObject<object>() ?? DBNull.Value);
 
-            var insertedId = await command.ExecuteScalarAsync();
+            // Ejecutar y obtener todos los datos insertados
+            await using var reader = await command.ExecuteReaderAsync();
+            var insertedData = new Dictionary<string, object>();
 
-            if (insertedId != null)
+            if (await reader.ReadAsync())
             {
-                await _authUtils.InsertUserHistory(userId, "general insert", $"Registro en {table} con ID {insertedId}");
-                _memoryCache.Remove($"general_all_{table}");
+                for (int i = 0; i < reader.FieldCount; i++)
+                {
+                    insertedData[reader.GetName(i)] = reader.GetValue(i);
+                }
             }
 
-            return Ok(new { Message = "Registro exitoso", Id = insertedId });
+            if (insertedData.Count > 0)
+            {
+                await _authUtils.InsertUserHistory(userId, "general insert", $"Registro en {table} con ID {insertedData["id"]}");
+                _memoryCache.Remove($"general_all_{table}");
+                return Ok(new { Message = "Registro exitoso", Data = insertedData });
+            }
+
+            return StatusCode(500, new { Message = "Error al insertar el registro" });
         }
 
-        // ✅ Actualización dinámica
+        // ✅ Actualización dinámica - CORREGIDO: Devuelve todos los datos actualizados
         [Authorize]
         [HttpPut("update/{id}")]
         public async Task<IActionResult> Actualizar(int id, [FromBody] JObject data, [FromQuery] string? table = "general")
@@ -248,7 +288,13 @@ namespace MyApiProject.Controllers.general
             catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); }
 
             var setClause = string.Join(",", data.Properties().Select(p => $"{p.Name} = @{p.Name}"));
-            string query = $"UPDATE {table} SET {setClause} WHERE id = @Id";
+
+            // Query modificada para devolver todos los campos actualizados
+            string query = $@"
+            UPDATE {table} 
+            SET {setClause} 
+            OUTPUT INSERTED.*
+            WHERE id = @Id";
 
             await using var connection = await OpenConnectionAsync();
             await using var command = new SqlCommand(query, connection);
@@ -257,20 +303,30 @@ namespace MyApiProject.Controllers.general
             foreach (var prop in data.Properties())
                 command.Parameters.AddWithValue("@" + prop.Name, prop.Value?.ToObject<object>() ?? DBNull.Value);
 
-            var result = await command.ExecuteNonQueryAsync();
+            // Ejecutar y obtener todos los datos actualizados
+            await using var reader = await command.ExecuteReaderAsync();
+            var updatedData = new Dictionary<string, object>();
 
-            if (result > 0)
+            if (await reader.ReadAsync())
             {
-                await _authUtils.InsertUserHistory(userId, "general update", $"Actualización en {table} con ID {id}");
+                for (int i = 0; i < reader.FieldCount; i++)
+                {
+                    updatedData[reader.GetName(i)] = reader.GetValue(i);
+                }
+            }
+
+            if (updatedData.Count > 0)
+            {
                 _memoryCache.Remove($"general_{table}_{id}");
                 _memoryCache.Remove($"general_all_{table}");
-                return Ok(new { Message = "Actualización exitosa" });
+                await _authUtils.InsertUserHistory(userId, "general update", $"Actualización en {table} con ID {id}");
+                return Ok(new { Message = "Actualización exitosa", Data = updatedData });
             }
 
             return NotFound(new { Message = "Registro no encontrado" });
         }
 
-        // ✅ Eliminación lógica
+        // ✅ Eliminación lógica - CORREGIDO: Devuelve los datos antes de archivar
         [Authorize]
         [HttpDelete("archivar/{id}")]
         public async Task<IActionResult> Archivar(int id, [FromQuery] string? table = "general")
@@ -279,25 +335,52 @@ namespace MyApiProject.Controllers.general
             try { userId = ObtenerUsuarioId(); }
             catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); }
 
-            string query = $"UPDATE {table} SET estado = 'archivado' WHERE id = @Id";
+            // Primero obtener los datos actuales
+            string selectQuery = $"SELECT * FROM {table} WHERE id = @Id";
+            Dictionary<string, object> originalData = new Dictionary<string, object>();
 
             await using var connection = await OpenConnectionAsync();
-            await using var command = new SqlCommand(query, connection);
-            command.Parameters.AddWithValue("@Id", id);
 
-            var result = await command.ExecuteNonQueryAsync();
+            // Obtener datos originales
+            await using var selectCommand = new SqlCommand(selectQuery, connection);
+            selectCommand.Parameters.AddWithValue("@Id", id);
+
+            await using var reader = await selectCommand.ExecuteReaderAsync();
+            if (await reader.ReadAsync())
+            {
+                for (int i = 0; i < reader.FieldCount; i++)
+                {
+                    originalData[reader.GetName(i)] = reader.GetValue(i);
+                }
+            }
+            await reader.CloseAsync();
+
+            if (originalData.Count == 0)
+                return NotFound(new { Message = "Registro no encontrado" });
+
+            // Realizar la actualización
+            string updateQuery = $"UPDATE {table} SET estado = 'archivado' WHERE id = @Id";
+            await using var updateCommand = new SqlCommand(updateQuery, connection);
+            updateCommand.Parameters.AddWithValue("@Id", id);
+
+            var result = await updateCommand.ExecuteNonQueryAsync();
 
             if (result > 0)
             {
-                await _authUtils.InsertUserHistory(userId, "general delete", $"Archivado de documento en {table} con ID {id}");
                 _memoryCache.Remove($"general_{table}_{id}");
                 _memoryCache.Remove($"general_all_{table}");
-                return Ok(new { Message = "Registro eliminado exitosamente" });
+                await _authUtils.InsertUserHistory(userId, "general delete", $"Archivado de documento en {table} con ID {id}");
+                return Ok(new
+                {
+                    Message = "Registro archivado exitosamente",
+                    Data = originalData
+                });
             }
 
             return NotFound(new { Message = "Registro no encontrado" });
         }
-        // ✅ Eliminación lógica
+
+        // ✅ Eliminación física - CORREGIDO: Devuelve los datos antes de eliminar
         [Authorize]
         [HttpDelete("delete/{id}")]
         public async Task<IActionResult> Eliminar(int id, [FromQuery] string? table = "general")
@@ -306,20 +389,46 @@ namespace MyApiProject.Controllers.general
             try { userId = ObtenerUsuarioId(); }
             catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); }
 
-            string query = $"DELETE {table} WHERE id = @Id";
+            // Primero obtener los datos actuales
+            string selectQuery = $"SELECT * FROM {table} WHERE id = @Id";
+            Dictionary<string, object> originalData = new Dictionary<string, object>();
 
             await using var connection = await OpenConnectionAsync();
-            await using var command = new SqlCommand(query, connection);
-            command.Parameters.AddWithValue("@Id", id);
 
-            var result = await command.ExecuteNonQueryAsync();
+            // Obtener datos originales
+            await using var selectCommand = new SqlCommand(selectQuery, connection);
+            selectCommand.Parameters.AddWithValue("@Id", id);
+
+            await using var reader = await selectCommand.ExecuteReaderAsync();
+            if (await reader.ReadAsync())
+            {
+                for (int i = 0; i < reader.FieldCount; i++)
+                {
+                    originalData[reader.GetName(i)] = reader.GetValue(i);
+                }
+            }
+            await reader.CloseAsync();
+
+            if (originalData.Count == 0)
+                return NotFound(new { Message = "Registro no encontrado" });
+
+            // Realizar la eliminación
+            string deleteQuery = $"DELETE FROM {table} WHERE id = @Id";
+            await using var deleteCommand = new SqlCommand(deleteQuery, connection);
+            deleteCommand.Parameters.AddWithValue("@Id", id);
+
+            var result = await deleteCommand.ExecuteNonQueryAsync();
 
             if (result > 0)
             {
                 await _authUtils.InsertUserHistory(userId, "general delete", $"Eliminación en {table} con ID {id}");
                 _memoryCache.Remove($"general_{table}_{id}");
                 _memoryCache.Remove($"general_all_{table}");
-                return Ok(new { Message = "Registro eliminado exitosamente" });
+                return Ok(new
+                {
+                    Message = "Registro eliminado exitosamente",
+                    Data = originalData
+                });
             }
 
             return NotFound(new { Message = "Registro no encontrado" });

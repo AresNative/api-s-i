@@ -220,9 +220,14 @@ namespace MyApiProject.Controllers
         }
         // Métodos agregados
         protected void BuildFilters(FiltrosRequest request, List<string> whereClauses, List<SqlParameter> parameters,
-                            Dictionary<string, int> parameterCounters)
+                    Dictionary<string, int> parameterCounters)
         {
-            var fechaParams = request.Filtros.Where(f => f.Key == "Fecha").ToList();
+            // Filtrar elementos vacíos primero
+            var validFiltros = request.Filtros
+                .Where(f => !string.IsNullOrWhiteSpace(f.Key) && !string.IsNullOrWhiteSpace(f.Value))
+                .ToList();
+
+            var fechaParams = validFiltros.Where(f => f.Key == "Fecha").ToList();
             bool fechaRangeProcessed = false;
 
             if (fechaParams.Count == 2)
@@ -230,17 +235,21 @@ namespace MyApiProject.Controllers
                 var minFecha = fechaParams.FirstOrDefault(f => f.Operator == ">=");
                 var maxFecha = fechaParams.FirstOrDefault(f => f.Operator == "<=");
 
-                if (minFecha != null && maxFecha != null)
+                if (minFecha != null && maxFecha != null &&
+                    !string.IsNullOrWhiteSpace(minFecha.Value) &&
+                    !string.IsNullOrWhiteSpace(maxFecha.Value))
                 {
-                    whereClauses.Add("Fecha BETWEEN @FechaMin AND @FechaMax");
+                    whereClauses.Add($"{fechaParams.First().Key} BETWEEN @FechaMin AND @FechaMax");
                     parameters.Add(new SqlParameter("@FechaMin", DateTime.Parse(minFecha.Value)));
                     parameters.Add(new SqlParameter("@FechaMax", DateTime.Parse(maxFecha.Value)));
                     fechaRangeProcessed = true;
                 }
             }
 
-            foreach (var filter in request.Filtros)
+            foreach (var filter in validFiltros)
             {
+                if (fechaRangeProcessed && filter.Key == "Fecha") continue;
+
                 string operatorClause = filter.Operator?.ToLower() switch
                 {
                     "like" => "LIKE",
@@ -250,24 +259,20 @@ namespace MyApiProject.Controllers
                     ">" => ">",
                     "<" => "<",
                     "<>" => "<>",
-                    _ => "LIKE"
+                    _ => "=" // Valor por defecto más seguro
                 };
 
-                if (fechaRangeProcessed && filter.Key == "Fecha") continue;
+                var column = filter.Key;
+                if (!parameterCounters.ContainsKey(column))
+                    parameterCounters[column] = 0;
+                else
+                    parameterCounters[column]++;
 
-                if (!string.IsNullOrWhiteSpace(filter.Value))
-                {
-                    var column = filter.Key;
-                    if (!parameterCounters.ContainsKey(column))
-                        parameterCounters[column] = 0;
-                    else
-                        parameterCounters[column]++;
+                var paramName = $"@{column}_{parameterCounters[column]}";
+                whereClauses.Add($"{column} {operatorClause} {paramName}");
 
-                    var paramName = $"@{column}_{parameterCounters[column]}";
-                    whereClauses.Add($"{column} {operatorClause} {paramName}");
-
-                    parameters.Add(new SqlParameter(paramName, operatorClause == "LIKE" ? $"%{filter.Value}%" : filter.Value));
-                }
+                var paramValue = operatorClause == "LIKE" ? $"%{filter.Value}%" : filter.Value;
+                parameters.Add(new SqlParameter(paramName, paramValue));
             }
         }
 
@@ -304,6 +309,131 @@ namespace MyApiProject.Controllers
             }
 
             return filePath;
+        }
+
+        // Métodos auxiliares para construir las cláusulas
+        protected string GetGroupByColumns(FiltrosRequest request)
+        {
+            var groupByColumns = request.Selects?
+                .Where(s => !string.IsNullOrWhiteSpace(s.Key))
+                .Select(s => s.Key)
+                .ToList();
+
+            return groupByColumns != null && groupByColumns.Any()
+                ? string.Join(", ", groupByColumns)
+                : "id";
+        }
+
+        // Modifica el método BuildSelectClause
+        protected (string selectClause, string groupByClause) BuildSelectClause(FiltrosRequest request)
+        {
+            var selectParts = new List<string>();
+            var groupByParts = new List<string>();
+
+            // Procesar columnas normales (SELECT)
+            var validSelects = request.Selects?
+                .Where(s => !string.IsNullOrWhiteSpace(s.Key))
+                .ToList();
+
+            if (validSelects != null && validSelects.Any())
+            {
+                foreach (var select in validSelects)
+                {
+                    selectParts.Add(select.Key);
+                    groupByParts.Add(select.Key);
+                }
+            }
+
+            // Procesar operaciones de agregación
+            var validAgregaciones = request.Agregaciones?
+                .Where(a => !string.IsNullOrWhiteSpace(a.Key))
+                .ToList();
+
+            if (validAgregaciones != null && validAgregaciones.Any())
+            {
+                foreach (var agregacion in validAgregaciones)
+                {
+                    string operation = !string.IsNullOrWhiteSpace(agregacion.Operation)
+                        ? agregacion.Operation.ToUpper()
+                        : "SUM";
+
+                    // Validar operaciones SQL permitidas
+                    string sqlOperation = operation switch
+                    {
+                        "SUM" => "SUM",
+                        "COUNT" => "COUNT",
+                        "AVG" => "AVG",
+                        "MIN" => "MIN",
+                        "MAX" => "MAX",
+                        "DISTINCT" => "DISTINCT",
+                        _ => "SUM" // Valor por defecto
+                    };
+
+                    string alias = !string.IsNullOrWhiteSpace(agregacion.Alias)
+                        ? agregacion.Alias
+                        : $"{sqlOperation}_{agregacion.Key}";
+
+                    if (sqlOperation == "DISTINCT")
+                    {
+                        selectParts.Add($"DISTINCT {agregacion.Key} AS {alias}");
+                    }
+                    else
+                    {
+                        selectParts.Add($"{sqlOperation}({agregacion.Key}) AS {alias}");
+                    }
+                }
+            }
+
+            // Si no hay selects ni agregaciones, devolver todas las columnas
+            string selectClause = selectParts.Any() ? string.Join(", ", selectParts) : "*";
+
+            // Solo agregar GROUP BY si hay columnas normales
+            string groupByClause = groupByParts.Any()
+                ? $"GROUP BY {string.Join(", ", groupByParts)}"
+                : "";
+
+            return (selectClause, groupByClause);
+        }
+        protected string BuildOrderByClause(FiltrosRequest request)
+        {
+            // Solo procesar órdenes que tengan Key no vacío
+            var validOrders = request.Order?
+                .Where(o => !string.IsNullOrWhiteSpace(o.Key))
+                .ToList();
+
+            if (validOrders == null || !validOrders.Any())
+            {
+                return "ORDER BY id"; // Orden por defecto
+            }
+
+            var orderParts = new List<string>();
+
+            foreach (var order in validOrders)
+            {
+                var direction = !string.IsNullOrWhiteSpace(order.Direction) &&
+                               order.Direction.ToUpper() == "DESC" ? "DESC" : "ASC";
+                orderParts.Add($"{order.Key} {direction}");
+            }
+
+            return $"ORDER BY {string.Join(", ", orderParts)}";
+        }
+        protected string GetGroupByColumnsForCount(FiltrosRequest request)
+        {
+            var selectColumns = request.Selects?
+                .Where(s => !string.IsNullOrWhiteSpace(s.Key))
+                .Select(s => s.Key)
+                .ToList();
+
+            if (selectColumns != null && selectColumns.Any())
+            {
+                // Si hay columnas para GROUP BY, usar DISTINCT
+                return $"DISTINCT {string.Join(", ", selectColumns)}";
+            }
+            else
+            {
+                // Si no hay columnas específicas, usar un campo único
+                return "id";
+            }
         }
     }
 }
