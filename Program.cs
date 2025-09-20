@@ -130,7 +130,6 @@ app.UseSwaggerUI(c =>
     }
     c.RoutePrefix = string.Empty; // Acceso a Swagger en la raíz
 });
-
 app.UseCors("AllowedCorsOrigins");
 app.UseRouting();
 app.UseAuthentication();

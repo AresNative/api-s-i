@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Data.SqlClient;
 using Microsoft.AspNetCore.Authorization;
 using Newtonsoft.Json.Linq;
@@ -21,7 +22,16 @@ namespace MyApiProject.Controllers.general
             _memoryCache = memoryCache;
             _authUtils = authUtils;
         }
-
+        [Authorize]
+        [HttpOptions("test-cors")]
+        public IActionResult TestCors()
+        {
+            return Ok(new
+            {
+                Message = "CORS configurado correctamente",
+                AllowedMethods = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
+            });
+        }
         // ✅ Consulta general (sin ID)
         [Authorize]
         [HttpGet("consultar")]
