@@ -1,40 +1,34 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
-using Microsoft.AspNetCore.Authorization;
 using Newtonsoft.Json.Linq;
 using Microsoft.Extensions.Caching.Memory;
 using MyApiProject.Models;
 
-namespace MyApiProject.Controllers.i_sync
+namespace MyApiProject.Controllers.pickup
 {
-    [ApiExplorerSettings(GroupName = "i_sync")]
-    [Route("api/v1/listas")]
+    [ApiExplorerSettings(GroupName = "pickup")]
+    [Route("api/v1/pickup/clientes")]
     [ApiController]
-    public partial class ListasController : BaseController
+    public partial class ClientesController : BaseController
     {
         private readonly IMemoryCache _memoryCache;
         private readonly AuthUtils _authUtils;
 
-        public ListasController(IConfiguration configuration, IMemoryCache memoryCache, AuthUtils authUtils) : base(configuration, memoryCache)
+        public ClientesController(IConfiguration configuration, IMemoryCache memoryCache, AuthUtils authUtils) : base(configuration, memoryCache)
         {
             _memoryCache = memoryCache;
             _authUtils = authUtils;
         }
 
-        // ✅ Consulta listas (sin ID)
-        [Authorize]
+        // ✅ Consulta clientes (sin ID)
         [HttpGet("consultar")]
-        public async Task<IActionResult> ConsultarListas()
+        public async Task<IActionResult> ConsultarClientes()
         {
-            int userId;
-            try { userId = ObtenerUsuarioId(); }
-            catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); }
-
-            string cacheKey = $"listas_all";
+            string cacheKey = $"clientes_all";
             if (_memoryCache.TryGetValue(cacheKey, out List<Dictionary<string, object>> cachedResults))
                 return Ok(cachedResults);
 
-            string query = $"SELECT * FROM [TC032841E].[dbo].listas";
+            string query = $"SELECT * FROM clientes";
 
             await using var connection = await OpenConnectionAsync();
             await using var command = new SqlCommand(query, connection);
@@ -52,24 +46,18 @@ namespace MyApiProject.Controllers.i_sync
 
             _memoryCache.Set(cacheKey, results, TimeSpan.FromMinutes(5));
 
-            await _authUtils.InsertUserHistory(userId, "listas load all", $"Consulta de todos los registros en listas");
             return Ok(results);
         }
 
         // ✅ Consulta por ID
-        [Authorize]
         [HttpGet("consultar/{id}")]
         public async Task<IActionResult> ConsultarPorId(int id)
         {
-            int userId;
-            try { userId = ObtenerUsuarioId(); }
-            catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); }
-
-            string cacheKey = $"listas_{id}";
+            string cacheKey = $"clientes_{id}";
             if (_memoryCache.TryGetValue(cacheKey, out List<Dictionary<string, object>> cachedResults))
                 return Ok(cachedResults);
 
-            string query = $"SELECT * FROM [TC032841E].[dbo].listas WHERE id = @ID";
+            string query = $"SELECT * FROM clientes WHERE id = @ID";
 
             await using var connection = await OpenConnectionAsync();
             await using var command = new SqlCommand(query, connection);
@@ -87,28 +75,23 @@ namespace MyApiProject.Controllers.i_sync
             }
 
             _memoryCache.Set(cacheKey, results, TimeSpan.FromMinutes(5));
-            await _authUtils.InsertUserHistory(userId, "listas load by id", $"Consulta en listas con ID {id}");
-
             return Ok(results);
         }
 
-        [Authorize]
         [HttpPost("consultar/filtros")]
-        public async Task<IActionResult> ConsultarListasConFiltros(
+        public async Task<IActionResult> ConsultarClientesConFiltros(
             [FromBody] FiltrosRequest request,
             [FromQuery] int page = 1,
             [FromQuery] int pageSize = 10)
         {
-            int userId;
-            try { userId = ObtenerUsuarioId(); }
-            catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); }
+
 
             if (page <= 0) page = 1;
             if (pageSize <= 0) pageSize = 10;
 
             int offset = (page - 1) * pageSize;
 
-            var baseQuery = @"FROM [TC032841E].[dbo].listas";
+            var baseQuery = @"FROM clientes";
             var whereClauses = new List<string>();
             var parameters = new List<SqlParameter>();
             var parameterCounters = new Dictionary<string, int>();
@@ -120,7 +103,7 @@ namespace MyApiProject.Controllers.i_sync
             var groupedWhereClauses = AgruparCondiciones(whereClauses);
 
             var whereQuery = groupedWhereClauses.Any()
-                ? $"WHERE {string.Join(" AND ", groupedWhereClauses)}"
+                ? $"WHERE  {string.Join(" AND ", groupedWhereClauses)}"
                 : "";
 
             var countQuery = $@"SELECT COUNT(*) AS TotalRegistros {baseQuery} {whereQuery}";
@@ -176,11 +159,8 @@ namespace MyApiProject.Controllers.i_sync
                     .Where(f => !string.IsNullOrWhiteSpace(f.Value))
                     .Select(f => $"{f.Key}_{f.Value}_{f.Operator}"));
 
-                var cacheKey = $"listas_filtros_{filtrosCacheKey}_page{page}_size{pageSize}";
+                var cacheKey = $"clientes_filtros_{filtrosCacheKey}_page{page}_size{pageSize}";
                 _memoryCache.Set(cacheKey, results, TimeSpan.FromMinutes(5));
-
-                await _authUtils.InsertUserHistory(userId, "listas load with filters",
-                    $"Consulta en listas con {request.Filtros.Count} filtros, página {page}, tamaño {pageSize}");
 
                 return Ok(new
                 {
@@ -193,30 +173,21 @@ namespace MyApiProject.Controllers.i_sync
             }
             catch (Exception ex)
             {
-                await _authUtils.InsertUserHistory(userId, "listas error",
-                    $"Error en consulta con filtros: {ex.Message}");
                 return StatusCode(500, new { Message = "Error interno del servidor", Details = ex.Message });
             }
         }
         // ✅ Registro dinámico con JSON
-        [Authorize]
         [HttpPost("register")]
         public async Task<IActionResult> Registrar([FromBody] JObject data)
         {
             if (data == null) return BadRequest(new { Message = "JSON inválido" });
-
-            int userId;
-            try { userId = ObtenerUsuarioId(); }
-            catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); }
-
-
             // 🔑 Construcción dinámica de columnas y parámetros
             var columnNames = string.Join(", ", data.Properties().Select(p => $"[{p.Name}]"));
             var parameterNames = string.Join(", ", data.Properties().Select(p => $"@{p.Name}"));
 
             var query = $@"
-            INSERT INTO [TC032841E].[dbo].[listas] ({columnNames})
-            OUTPUT INSERTED.id
+            INSERT INTO [clientes] ({columnNames})
+            OUTPUT INSERTED.*
             VALUES ({parameterNames});";
 
             await using var connection = await OpenConnectionAsync();
@@ -225,30 +196,37 @@ namespace MyApiProject.Controllers.i_sync
             foreach (var prop in data.Properties())
                 command.Parameters.AddWithValue("@" + prop.Name, prop.Value?.ToObject<object>() ?? DBNull.Value);
 
-            var insertedId = await command.ExecuteScalarAsync();
+            // Ejecutar y obtener todos los datos insertados
+            await using var reader = await command.ExecuteReaderAsync();
+            var insertedData = new Dictionary<string, object>();
 
-            if (insertedId != null)
+            if (await reader.ReadAsync())
             {
-                await _authUtils.InsertUserHistory(userId, "listas insert", $"Registro en listas con ID {insertedId}");
-                _memoryCache.Remove($"listas_all");
+                for (int i = 0; i < reader.FieldCount; i++)
+                {
+                    insertedData[reader.GetName(i)] = reader.GetValue(i);
+                }
             }
 
-            return Ok(new { Message = "Registro exitoso", Id = insertedId });
+            if (insertedData.Count > 0)
+            {
+                _memoryCache.Remove($"clientes_all");
+                return Ok(new { Message = "Registro exitoso", Data = insertedData });
+            }
+
+            return StatusCode(500, new { Message = "Error al insertar el registro" });
         }
 
         // ✅ Actualización dinámica
-        [Authorize]
         [HttpPut("update/{id}")]
         public async Task<IActionResult> Actualizar(int id, [FromBody] JObject data)
         {
             if (data == null) return BadRequest(new { Message = "JSON inválido" });
 
-            int userId;
-            try { userId = ObtenerUsuarioId(); }
-            catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); }
+
 
             var setClause = string.Join(",", data.Properties().Select(p => $"{p.Name} = @{p.Name}"));
-            string query = $"UPDATE [TC032841E].[dbo].listas SET {setClause} WHERE id = @Id";
+            string query = $"UPDATE clientes SET {setClause} WHERE id = @Id";
 
             await using var connection = await OpenConnectionAsync();
             await using var command = new SqlCommand(query, connection);
@@ -261,9 +239,8 @@ namespace MyApiProject.Controllers.i_sync
 
             if (result > 0)
             {
-                await _authUtils.InsertUserHistory(userId, "listas update", $"Actualización en listas con ID {id}");
-                _memoryCache.Remove($"listas_{id}");
-                _memoryCache.Remove($"listas_all");
+                _memoryCache.Remove($"clientes_{id}");
+                _memoryCache.Remove($"clientes_all");
                 return Ok(new { Message = "Actualización exitosa" });
             }
 
@@ -271,15 +248,12 @@ namespace MyApiProject.Controllers.i_sync
         }
 
         // ✅ Eliminación lógica
-        [Authorize]
         [HttpDelete("archivar/{id}")]
         public async Task<IActionResult> Archivar(int id)
         {
-            int userId;
-            try { userId = ObtenerUsuarioId(); }
-            catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); }
 
-            string query = $"UPDATE [TC032841E].[dbo].listas SET estado = 'archivado' WHERE id = @Id";
+
+            string query = $"UPDATE clientes SET estado = 'archivado' WHERE id = @Id";
 
             await using var connection = await OpenConnectionAsync();
             await using var command = new SqlCommand(query, connection);
@@ -289,24 +263,20 @@ namespace MyApiProject.Controllers.i_sync
 
             if (result > 0)
             {
-                await _authUtils.InsertUserHistory(userId, "listas delete", $"Archivado de documento en listas con ID {id}");
-                _memoryCache.Remove($"listas_{id}");
-                _memoryCache.Remove($"listas_all");
+                _memoryCache.Remove($"clientes_{id}");
+                _memoryCache.Remove($"clientes_all");
                 return Ok(new { Message = "Registro eliminado exitosamente" });
             }
 
             return NotFound(new { Message = "Registro no encontrado" });
         }
         // ✅ Eliminación lógica
-        [Authorize]
         [HttpDelete("delete/{id}")]
         public async Task<IActionResult> Eliminar(int id)
         {
-            int userId;
-            try { userId = ObtenerUsuarioId(); }
-            catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); }
 
-            string query = $"DELETE [TC032841E].[dbo].listas WHERE id = @Id";
+
+            string query = $"DELETE clientes WHERE id = @Id";
 
             await using var connection = await OpenConnectionAsync();
             await using var command = new SqlCommand(query, connection);
@@ -316,9 +286,8 @@ namespace MyApiProject.Controllers.i_sync
 
             if (result > 0)
             {
-                await _authUtils.InsertUserHistory(userId, "listas delete", $"Eliminación en listas con ID {id}");
-                _memoryCache.Remove($"listas_{id}");
-                _memoryCache.Remove($"listas_all");
+                _memoryCache.Remove($"clientes_{id}");
+                _memoryCache.Remove($"clientes_all");
                 return Ok(new { Message = "Registro eliminado exitosamente" });
             }
 

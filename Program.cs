@@ -80,7 +80,7 @@ var swaggerGroups = new[]
     new { Name = "ventas",  Title = "Ventas" },
     new { Name = "proveedores", Title = "Proveedores" },
     new { Name = "subasta", Title = "Subasta" },
-    new { Name = "i_sync", Title = "I-Sync" }
+    new { Name = "pickup", Title = "Pickup" }
 };
 // Configuración de Swagger con seguridad JWT optimizada
 builder.Services.AddEndpointsApiExplorer();
