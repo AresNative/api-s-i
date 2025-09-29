@@ -5,6 +5,8 @@ using Microsoft.AspNetCore.Authorization;
 using Newtonsoft.Json.Linq;
 using Microsoft.Extensions.Caching.Memory;
 using MyApiProject.Models;
+using Microsoft.AspNetCore.SignalR;
+using MyApiProject.Hubs;
 
 namespace MyApiProject.Controllers.general
 {
@@ -16,11 +18,15 @@ namespace MyApiProject.Controllers.general
         private readonly IMemoryCache _memoryCache;
         private readonly AuthUtils _authUtils;
 
-        public GeneralController(IConfiguration configuration, IMemoryCache memoryCache, AuthUtils authUtils)
+        private readonly IHubContext<GeneralHubs> _hubContext;
+
+        public GeneralController(IConfiguration configuration, IMemoryCache memoryCache, AuthUtils authUtils,
+            IHubContext<GeneralHubs> hubContext)
             : base(configuration, memoryCache)
         {
             _memoryCache = memoryCache;
             _authUtils = authUtils;
+            _hubContext = hubContext;
         }
         [Authorize]
         [HttpOptions("test-cors")]
@@ -43,7 +49,19 @@ namespace MyApiProject.Controllers.general
 
             string cacheKey = $"general_all_{table}";
             if (_memoryCache.TryGetValue(cacheKey, out List<Dictionary<string, object>> cachedResults))
+            {
+                // Notificar a los clientes que se accedió a los datos
+                await _hubContext.Clients.Group("PedidosGeneral")
+                    .SendAsync("ConsultaRealizada", new
+                    {
+                        UsuarioId = userId,
+                        Tabla = table,
+                        Tipo = "ConsultaGeneral",
+                        Timestamp = DateTime.UtcNow
+                    });
+
                 return Ok(cachedResults);
+            }
 
             string query = $"SELECT * FROM {table}";
 
@@ -62,6 +80,17 @@ namespace MyApiProject.Controllers.general
             }
 
             _memoryCache.Set(cacheKey, results, TimeSpan.FromMinutes(5));
+
+            // Notificar a todos los clientes conectados
+            await _hubContext.Clients.Group("PedidosGeneral")
+                .SendAsync("DatosActualizados", new
+                {
+                    Tabla = table,
+                    Accion = "Consulta",
+                    TotalRegistros = results.Count,
+                    Timestamp = DateTime.UtcNow
+                });
+
             await _authUtils.InsertUserHistory(userId, "general load all", $"Consulta de todos los registros en {table}");
             return Ok(results);
         }
@@ -97,6 +126,16 @@ namespace MyApiProject.Controllers.general
             }
 
             _memoryCache.Set(cacheKey, results, TimeSpan.FromMinutes(5));
+            // Notificar a todos los clientes conectados
+            await _hubContext.Clients.Group("PedidosGeneral")
+                .SendAsync("DatosActualizados", new
+                {
+                    Tabla = table,
+                    Accion = "ConsultaID",
+                    TotalRegistros = results.Count,
+                    Timestamp = DateTime.UtcNow
+                });
+
             await _authUtils.InsertUserHistory(userId, "general load by id", $"Consulta en {table} con ID {id}");
             return Ok(results);
         }
@@ -217,6 +256,16 @@ namespace MyApiProject.Controllers.general
 
                 var cacheKey = $"general_filtros_{filtrosCacheKey}_page{page}_size{pageSize}";
                 _memoryCache.Set(cacheKey, results, TimeSpan.FromMinutes(5));
+
+                // Notificar a todos los clientes conectados
+                await _hubContext.Clients.Group("PedidosGeneral")
+                    .SendAsync("DatosActualizados", new
+                    {
+                        Tabla = table,
+                        Accion = "ConsultaFiltros",
+                        TotalRegistros = results.Count,
+                        Timestamp = DateTime.UtcNow
+                    });
                 await _authUtils.InsertUserHistory(userId, "general load with filters",
                                     $"Consulta en general con {request.Filtros.Count} filtros, página {page}, tamaño {pageSize}");
 
@@ -238,6 +287,7 @@ namespace MyApiProject.Controllers.general
         }
 
         // ✅ Registro dinámico con JSON - CORREGIDO: Devuelve todos los datos insertados
+        // ✅ Registro dinámico con SignalR
         [Authorize]
         [HttpPost("register")]
         public async Task<IActionResult> Registrar([FromBody] JObject data, [FromQuery] string? table = "general")
@@ -248,11 +298,9 @@ namespace MyApiProject.Controllers.general
             try { userId = ObtenerUsuarioId(); }
             catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); }
 
-            // 🔑 Construcción dinámica de columnas y parámetros
             var columnNames = string.Join(", ", data.Properties().Select(p => $"[{p.Name}]"));
             var parameterNames = string.Join(", ", data.Properties().Select(p => $"@{p.Name}"));
 
-            // Query modificada para devolver todos los campos insertados
             var query = $@"
             INSERT INTO [{table}] ({columnNames})
             OUTPUT INSERTED.*
@@ -264,7 +312,6 @@ namespace MyApiProject.Controllers.general
             foreach (var prop in data.Properties())
                 command.Parameters.AddWithValue("@" + prop.Name, prop.Value?.ToObject<object>() ?? DBNull.Value);
 
-            // Ejecutar y obtener todos los datos insertados
             await using var reader = await command.ExecuteReaderAsync();
             var insertedData = new Dictionary<string, object>();
 
@@ -278,6 +325,17 @@ namespace MyApiProject.Controllers.general
 
             if (insertedData.Count > 0)
             {
+                // Notificar a todos los clientes sobre el nuevo registro
+                await _hubContext.Clients.Group("PedidosGeneral")
+                    .SendAsync("NuevoRegistro", new
+                    {
+                        Tabla = table,
+                        Registro = insertedData,
+                        Accion = "Insert",
+                        UsuarioId = userId,
+                        Timestamp = DateTime.UtcNow
+                    });
+
                 await _authUtils.InsertUserHistory(userId, "general insert", $"Registro en {table} con ID {insertedData["id"]}");
                 _memoryCache.Remove($"general_all_{table}");
                 return Ok(new { Message = "Registro exitoso", Data = insertedData });
@@ -299,7 +357,6 @@ namespace MyApiProject.Controllers.general
 
             var setClause = string.Join(",", data.Properties().Select(p => $"{p.Name} = @{p.Name}"));
 
-            // Query modificada para devolver todos los campos actualizados
             string query = $@"
             UPDATE {table} 
             SET {setClause} 
@@ -313,7 +370,6 @@ namespace MyApiProject.Controllers.general
             foreach (var prop in data.Properties())
                 command.Parameters.AddWithValue("@" + prop.Name, prop.Value?.ToObject<object>() ?? DBNull.Value);
 
-            // Ejecutar y obtener todos los datos actualizados
             await using var reader = await command.ExecuteReaderAsync();
             var updatedData = new Dictionary<string, object>();
 
@@ -327,6 +383,22 @@ namespace MyApiProject.Controllers.general
 
             if (updatedData.Count > 0)
             {
+                // Notificar a todos los clientes sobre la actualización
+                await _hubContext.Clients.Group("PedidosGeneral")
+                    .SendAsync("RegistroActualizado", new
+                    {
+                        Tabla = table,
+                        RegistroId = id,
+                        DatosActualizados = updatedData,
+                        Accion = "Update",
+                        UsuarioId = userId,
+                        Timestamp = DateTime.UtcNow
+                    });
+
+                // Notificar específicamente al grupo del pedido si existe
+                await _hubContext.Clients.Group($"Pedido_{id}")
+                    .SendAsync("PedidoActualizado", updatedData);
+
                 _memoryCache.Remove($"general_{table}_{id}");
                 _memoryCache.Remove($"general_all_{table}");
                 await _authUtils.InsertUserHistory(userId, "general update", $"Actualización en {table} con ID {id}");
@@ -351,7 +423,6 @@ namespace MyApiProject.Controllers.general
 
             await using var connection = await OpenConnectionAsync();
 
-            // Obtener datos originales
             await using var selectCommand = new SqlCommand(selectQuery, connection);
             selectCommand.Parameters.AddWithValue("@Id", id);
 
@@ -377,6 +448,18 @@ namespace MyApiProject.Controllers.general
 
             if (result > 0)
             {
+                // Notificar a todos los clientes sobre el archivado
+                await _hubContext.Clients.Group("PedidosGeneral")
+                    .SendAsync("RegistroArchivado", new
+                    {
+                        Tabla = table,
+                        RegistroId = id,
+                        DatosOriginales = originalData,
+                        Accion = "Archive",
+                        UsuarioId = userId,
+                        Timestamp = DateTime.UtcNow
+                    });
+
                 _memoryCache.Remove($"general_{table}_{id}");
                 _memoryCache.Remove($"general_all_{table}");
                 await _authUtils.InsertUserHistory(userId, "general delete", $"Archivado de documento en {table} con ID {id}");
@@ -431,6 +514,18 @@ namespace MyApiProject.Controllers.general
 
             if (result > 0)
             {
+                // Notificar a todos los clientes sobre el eliminado
+                await _hubContext.Clients.Group("PedidosGeneral")
+                    .SendAsync("RegistroEliminado", new
+                    {
+                        Tabla = table,
+                        RegistroId = id,
+                        DatosOriginales = originalData,
+                        Accion = "Delete",
+                        UsuarioId = userId,
+                        Timestamp = DateTime.UtcNow
+                    });
+
                 await _authUtils.InsertUserHistory(userId, "general delete", $"Eliminación en {table} con ID {id}");
                 _memoryCache.Remove($"general_{table}_{id}");
                 _memoryCache.Remove($"general_all_{table}");

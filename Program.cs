@@ -134,6 +134,6 @@ app.UseCors("AllowedCorsOrigins");
 app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
-app.MapHub<Hubs>("/Hubs");
+app.MapHub<GeneralHubs>("/Hubs");
 app.MapControllers();
 app.Run();
