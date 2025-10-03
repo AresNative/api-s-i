@@ -177,14 +177,32 @@ namespace MyApiProject.Controllers.general
             // Construir ORDER BY
             string orderByClause = BuildOrderByClause(request);
 
-            // Query para contar (usando subquery para evitar problemas con GROUP BY)
+            string countColumns;
+
+            if (!string.IsNullOrEmpty(groupByClause))
+            {
+                // Usar alias si existe, sino usar Key
+                countColumns = string.Join(", ", request.Selects
+                    .Where(s => !string.IsNullOrWhiteSpace(s.Key))
+                    .Select(s =>
+                        !string.IsNullOrWhiteSpace(s.Alias)
+                            ? $"{s.Key} AS {s.Alias}"  // 👈 aplica alias en el SELECT del subquery
+                            : s.Key
+                    ));
+            }
+            else
+            {
+                countColumns = GetGroupByColumnsForCount(request);
+            }
+
+
             var countQuery = $@"
-                SELECT COUNT(*) AS TotalRegistros 
-                FROM (
-                    SELECT {GetGroupByColumnsForCount(request)}
-                    {baseQuery} {whereQuery}
-                    {(string.IsNullOrEmpty(groupByClause) ? "" : groupByClause)}
-                ) AS CountTable";
+            SELECT COUNT(*) AS TotalRegistros 
+            FROM (
+                SELECT {countColumns}
+                {baseQuery} {whereQuery}
+                {groupByClause}
+            ) AS CountTable";
 
             // Construir query principal de manera más segura
             var queryBuilder = new System.Text.StringBuilder();
@@ -282,7 +300,7 @@ namespace MyApiProject.Controllers.general
             {
                 await _authUtils.InsertUserHistory(userId, "general error",
                     $"Error en consulta con filtros: {ex.Message}");
-                return StatusCode(500, new { Message = "Error interno del servidor", Details = ex.Message });
+                return StatusCode(500, new { Message = "Error interno del servidor", Details = ex.Message, counter = countQuery, query = paginatedQuery });
             }
         }
 

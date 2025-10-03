@@ -339,8 +339,15 @@ namespace MyApiProject.Controllers
             {
                 foreach (var select in validSelects)
                 {
-                    selectParts.Add(select.Key);
-                    groupByParts.Add(select.Key);
+                    if (!string.IsNullOrWhiteSpace(select.Alias))
+                    {
+                        selectParts.Add($"{select.Key} AS {select.Alias}");
+                    }
+                    else
+                    {
+                        selectParts.Add(select.Key);
+                    }
+                    groupByParts.Add(select.Key);   // 👈 columna original si no hay alias
                 }
             }
 
@@ -386,8 +393,6 @@ namespace MyApiProject.Controllers
 
             // Si no hay selects ni agregaciones, devolver todas las columnas
             string selectClause = selectParts.Any() ? string.Join(", ", selectParts) : "*";
-
-            // Solo agregar GROUP BY si hay columnas normales
             string groupByClause = groupByParts.Any()
                 ? $"GROUP BY {string.Join(", ", groupByParts)}"
                 : "";
@@ -421,17 +426,19 @@ namespace MyApiProject.Controllers
         {
             var selectColumns = request.Selects?
                 .Where(s => !string.IsNullOrWhiteSpace(s.Key))
-                .Select(s => s.Key)
+                .Select(s =>
+                    !string.IsNullOrWhiteSpace(s.Alias)
+                        ? $"{s.Key} AS {s.Alias}"
+                        : s.Key
+                )
                 .ToList();
 
             if (selectColumns != null && selectColumns.Any())
             {
-                // Si hay columnas para GROUP BY, usar DISTINCT
                 return $"DISTINCT {string.Join(", ", selectColumns)}";
             }
             else
             {
-                // Si no hay columnas específicas, usar un campo único
                 return "id";
             }
         }
