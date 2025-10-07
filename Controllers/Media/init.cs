@@ -90,12 +90,8 @@ namespace MyApiProject.Controllers.general
 
             try
             {
-                // Validar tabla permitida
-                if (!new[] { "tareas", "proyectos", "clientes" }.Contains(request.Tabla.ToLower()))
-                    return BadRequest("Tabla de referencia no válida");
-
                 // Guardar archivo
-                var uploadsPath = Path.Combine(Directory.GetCurrentDirectory(), "Uploads", "imagenes");
+                var uploadsPath = Path.Combine(Directory.GetCurrentDirectory(), "uploads", "imagenes");
                 Directory.CreateDirectory(uploadsPath);
 
                 var fileExtension = Path.GetExtension(request.File.FileName).ToLower();
@@ -110,7 +106,6 @@ namespace MyApiProject.Controllers.general
                 {
                     await request.File.CopyToAsync(stream);
                 }
-
                 // Insertar en base de datos
                 await using var connection = await OpenConnectionAsync();
                 var query = @"
@@ -123,7 +118,6 @@ namespace MyApiProject.Controllers.general
                 command.Parameters.AddWithValue("@Tabla", request.Tabla);
                 command.Parameters.AddWithValue("@Url", publicUrl);
                 command.Parameters.AddWithValue("@Descripcion", request.Descripcion ?? string.Empty);
-                command.Parameters.AddWithValue("@UsuarioId", userId);
 
                 var insertedId = await command.ExecuteScalarAsync();
 
@@ -280,12 +274,8 @@ namespace MyApiProject.Controllers.general
 
             try
             {
-                // Validar tabla permitida
-                if (!new[] { "tareas", "proyectos", "clientes" }.Contains(request.Tabla.ToLower()))
-                    return BadRequest("Tabla de referencia no válida");
-
                 // Guardar archivo
-                var uploadsPath = Path.Combine(Directory.GetCurrentDirectory(), "Uploads", "archivos");
+                var uploadsPath = Path.Combine(Directory.GetCurrentDirectory(), "uploads", "archivos");
                 Directory.CreateDirectory(uploadsPath);
 
                 var fileExtension = Path.GetExtension(request.File.FileName);
@@ -397,6 +387,109 @@ namespace MyApiProject.Controllers.general
             {
                 return HandleException(ex, "Error al eliminar archivo");
             }
+        }
+
+        #endregion
+
+        #region Endpoints para Visualización de Archivos
+
+        [AllowAnonymous]
+        [HttpGet("ver/{tipo}/{filename}")]
+        public IActionResult VerArchivo(string tipo, string filename)
+        {
+            try
+            {
+                // Validar que el tipo sea seguro
+                if (!new[] { "imagenes", "archivos" }.Contains(tipo.ToLower()))
+                    return BadRequest(new { Message = "Tipo de archivo no válido" });
+
+                var filePath = Path.Combine(Directory.GetCurrentDirectory(), "uploads", tipo, filename);
+
+                if (!System.IO.File.Exists(filePath))
+                    return NotFound(new { Message = "Archivo no encontrado" });
+
+                var contentType = GetContentType(filename);
+                return PhysicalFile(filePath, contentType);
+            }
+            catch (Exception ex)
+            {
+                return HandleException(ex, "Error al cargar archivo");
+            }
+        }
+
+        [Authorize]
+        [HttpGet("archivos-subidos")]
+        public async Task<IActionResult> ListarArchivosSubidos()
+        {
+            try
+            {
+                int userId = ObtenerUsuarioId();
+                var uploadsPath = Path.Combine(Directory.GetCurrentDirectory(), "uploads");
+
+                var result = new
+                {
+                    Imagenes = ListarArchivosEnCarpeta(Path.Combine(uploadsPath, "imagenes")),
+                    Archivos = ListarArchivosEnCarpeta(Path.Combine(uploadsPath, "archivos"))
+                };
+
+                await _authUtils.InsertUserHistory(
+                    userId,
+                    "recursos_lista_archivos",
+                    "Consultó lista de archivos subidos"
+                );
+
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return HandleException(ex, "Error al listar archivos");
+            }
+        }
+
+        #endregion
+
+        #region Métodos Auxiliares
+
+        private List<object> ListarArchivosEnCarpeta(string folderPath)
+        {
+            if (!Directory.Exists(folderPath))
+                return new List<object>();
+
+            return Directory.GetFiles(folderPath)
+                .Select(file => new
+                {
+                    Nombre = Path.GetFileName(file),
+                    Ruta = $"/uploads/{Path.GetFileName(Path.GetDirectoryName(file))}/{Path.GetFileName(file)}",
+                    Tamaño = new FileInfo(file).Length,
+                    FechaModificacion = System.IO.File.GetLastWriteTime(file),
+                    Tipo = Path.GetExtension(file).ToLower()
+                })
+                .Cast<object>()
+                .ToList();
+        }
+
+        private string GetContentType(string filename)
+        {
+            var extension = Path.GetExtension(filename).ToLower();
+            return extension switch
+            {
+                ".jpg" or ".jpeg" => "image/jpeg",
+                ".png" => "image/png",
+                ".gif" => "image/gif",
+                ".webp" => "image/webp",
+                ".svg" => "image/svg+xml",
+                ".bmp" => "image/bmp",
+                ".pdf" => "application/pdf",
+                ".doc" => "application/msword",
+                ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                ".xls" => "application/vnd.ms-excel",
+                ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ".txt" => "text/plain",
+                ".csv" => "text/csv",
+                ".zip" => "application/zip",
+                ".rar" => "application/x-rar-compressed",
+                _ => "application/octet-stream"
+            };
         }
 
         #endregion

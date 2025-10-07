@@ -119,7 +119,16 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 var app = builder.Build();
+// CONFIGURACIÓN DE ARCHIVOS ESTÁTICOS - AGREGAR ESTO
+app.UseStaticFiles(); // Para wwwroot
 
+// Servir archivos subidos desde la carpeta uploads
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(
+        Path.Combine(builder.Environment.ContentRootPath, "uploads")),
+    RequestPath = "/uploads"
+});
 // Configuración del pipeline
 app.UseSwagger();
 app.UseSwaggerUI(c =>
