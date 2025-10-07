@@ -123,6 +123,9 @@ var app = builder.Build();
 app.UseStaticFiles(); // Para wwwroot
 
 // Servir archivos subidos desde la carpeta uploads
+/* 
+    @ * Asegúrate de que la carpeta "uploads" exista en el directorio raíz de tu proyecto. *@
+*/
 app.UseStaticFiles(new StaticFileOptions
 {
     FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(
