@@ -365,7 +365,7 @@ namespace MyApiProject.Controllers.general
         // ✅ Actualización dinámica - CORREGIDO: Devuelve todos los datos actualizados
         [Authorize]
         [HttpPut("update/{id}")]
-        public async Task<IActionResult> Actualizar(int id, [FromBody] JObject data, [FromQuery] string? table = "general")
+        public async Task<IActionResult> Actualizar(int id, [FromBody] JObject data, [FromQuery] string? column = "id", [FromQuery] string? table = "general")
         {
             if (data == null) return BadRequest(new { Message = "JSON inválido" });
 
@@ -379,7 +379,7 @@ namespace MyApiProject.Controllers.general
             UPDATE {table} 
             SET {setClause} 
             OUTPUT INSERTED.*
-            WHERE id = @Id";
+            WHERE {column} = @Id";
 
             await using var connection = await OpenConnectionAsync();
             await using var command = new SqlCommand(query, connection);
@@ -429,14 +429,14 @@ namespace MyApiProject.Controllers.general
         // ✅ Eliminación lógica - CORREGIDO: Devuelve los datos antes de archivar
         [Authorize]
         [HttpDelete("archivar/{id}")]
-        public async Task<IActionResult> Archivar(int id, [FromQuery] string? table = "general")
+        public async Task<IActionResult> Archivar([FromQuery] int id, [FromQuery] string? column = "id", [FromQuery] string? table = "general")
         {
             int userId;
             try { userId = ObtenerUsuarioId(); }
             catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); }
 
             // Primero obtener los datos actuales
-            string selectQuery = $"SELECT * FROM {table} WHERE id = @Id";
+            string selectQuery = $"SELECT * FROM {table} WHERE {column} = @Id";
             Dictionary<string, object> originalData = new Dictionary<string, object>();
 
             await using var connection = await OpenConnectionAsync();
@@ -458,7 +458,7 @@ namespace MyApiProject.Controllers.general
                 return NotFound(new { Message = "Registro no encontrado" });
 
             // Realizar la actualización
-            string updateQuery = $"UPDATE {table} SET estado = 'archivado' WHERE id = @Id";
+            string updateQuery = $"UPDATE {table} SET estado = 'archivado' WHERE {column} = @Id";
             await using var updateCommand = new SqlCommand(updateQuery, connection);
             updateCommand.Parameters.AddWithValue("@Id", id);
 
@@ -494,14 +494,14 @@ namespace MyApiProject.Controllers.general
         // ✅ Eliminación física - CORREGIDO: Devuelve los datos antes de eliminar
         [Authorize]
         [HttpDelete("delete/{id}")]
-        public async Task<IActionResult> Eliminar(int id, [FromQuery] string? table = "general")
+        public async Task<IActionResult> Eliminar(int id, [FromQuery] string? column = "id", [FromQuery] string? table = "general")
         {
             int userId;
             try { userId = ObtenerUsuarioId(); }
             catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); }
 
             // Primero obtener los datos actuales
-            string selectQuery = $"SELECT * FROM {table} WHERE id = @Id";
+            string selectQuery = $"SELECT * FROM {table} WHERE {column} = @Id";
             Dictionary<string, object> originalData = new Dictionary<string, object>();
 
             await using var connection = await OpenConnectionAsync();
@@ -524,7 +524,7 @@ namespace MyApiProject.Controllers.general
                 return NotFound(new { Message = "Registro no encontrado" });
 
             // Realizar la eliminación
-            string deleteQuery = $"DELETE FROM {table} WHERE id = @Id";
+            string deleteQuery = $"DELETE FROM {table} WHERE {column} = @Id";
             await using var deleteCommand = new SqlCommand(deleteQuery, connection);
             deleteCommand.Parameters.AddWithValue("@Id", id);
 

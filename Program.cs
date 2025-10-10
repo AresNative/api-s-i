@@ -120,8 +120,8 @@ builder.Services.AddSwaggerGen(c =>
 
 var app = builder.Build();
 // CONFIGURACIÓN DE ARCHIVOS ESTÁTICOS - AGREGAR ESTO
-app.UseStaticFiles(); // Para wwwroot
-
+// @ Para wwwroot
+//app.UseStaticFiles();
 // Servir archivos subidos desde la carpeta uploads
 /* 
     @ * Asegúrate de que la carpeta "uploads" exista en el directorio raíz de tu proyecto. *@

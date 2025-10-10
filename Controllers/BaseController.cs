@@ -148,10 +148,10 @@ namespace MyApiProject.Controllers
                 }
 
                 var query = $@"
-            INSERT INTO [{tableName}] ({string.Join(", ", allColumns)})
-            OUTPUT INSERTED.ID
-            VALUES ({string.Join(", ", allParameters)});
-        ";
+                            INSERT INTO [{tableName}] ({string.Join(", ", allColumns)})
+                            OUTPUT INSERTED.ID
+                            VALUES ({string.Join(", ", allParameters)});
+                            ";
 
                 await using var command = new SqlCommand(query, connection);
                 command.Parameters.AddRange(sqlParameters.ToArray());
