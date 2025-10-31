@@ -316,50 +316,111 @@ namespace MyApiProject.Controllers.general
             try { userId = ObtenerUsuarioId(); }
             catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); }
 
-            var columnNames = string.Join(", ", data.Properties().Select(p => $"[{p.Name}]"));
-            var parameterNames = string.Join(", ", data.Properties().Select(p => $"@{p.Name}"));
-
-            var query = $@"
-            INSERT INTO [{table}] ({columnNames})
-            OUTPUT INSERTED.*
-            VALUES ({parameterNames});";
-
-            await using var connection = await OpenConnectionAsync();
-            await using var command = new SqlCommand(query, connection);
-
-            foreach (var prop in data.Properties())
-                command.Parameters.AddWithValue("@" + prop.Name, prop.Value?.ToObject<object>() ?? DBNull.Value);
-
-            await using var reader = await command.ExecuteReaderAsync();
-            var insertedData = new Dictionary<string, object>();
-
-            if (await reader.ReadAsync())
+            try
             {
-                for (int i = 0; i < reader.FieldCount; i++)
+                Console.WriteLine($"=== REGISTER DEBUG ===");
+                Console.WriteLine($"Tabla: {table}");
+                Console.WriteLine($"Usuario ID: {userId}");
+                Console.WriteLine($"JSON recibido: {data.ToString()}");
+
+                var columnNames = string.Join(", ", data.Properties().Select(p => $"[{p.Name}]"));
+                var parameterNames = string.Join(", ", data.Properties().Select(p => $"@{p.Name}"));
+
+                var query = $@"
+                    INSERT INTO {table} ({columnNames})
+                    OUTPUT INSERTED.*
+                    VALUES ({parameterNames});";
+
+                Console.WriteLine($"Query: {query}");
+
+                await using var connection = await OpenConnectionAsync();
+                Console.WriteLine("Conexión abierta exitosamente");
+
+                await using var command = new SqlCommand(query, connection);
+
+                foreach (var prop in data.Properties())
                 {
-                    insertedData[reader.GetName(i)] = reader.GetValue(i);
+                    var value = prop.Value?.ToObject<object>() ?? DBNull.Value;
+                    Console.WriteLine($"Parámetro: @{prop.Name} = {value} (Tipo: {value.GetType()})");
+                    command.Parameters.AddWithValue("@" + prop.Name, value);
                 }
-            }
 
-            if (insertedData.Count > 0)
-            {
-                // Notificar a todos los clientes sobre el nuevo registro
-                await _hubContext.Clients.Group("PedidosGeneral")
-                    .SendAsync("NuevoRegistro", new
+                Console.WriteLine("Ejecutando consulta...");
+                await using var reader = await command.ExecuteReaderAsync();
+                Console.WriteLine("Consulta ejecutada");
+
+                var insertedData = new Dictionary<string, object>();
+
+                if (await reader.ReadAsync())
+                {
+                    for (int i = 0; i < reader.FieldCount; i++)
                     {
-                        Tabla = table,
-                        Registro = insertedData,
-                        Accion = "Insert",
-                        UsuarioId = userId,
-                        Timestamp = DateTime.UtcNow
-                    });
+                        insertedData[reader.GetName(i)] = reader.GetValue(i);
+                    }
+                    Console.WriteLine($"Datos insertados: {System.Text.Json.JsonSerializer.Serialize(insertedData)}");
+                }
+                else
+                {
+                    Console.WriteLine("No se pudo leer los datos insertados");
+                }
 
-                await _authUtils.InsertUserHistory(userId, "general insert", $"Registro en {table} con ID {insertedData["id"]}");
-                _memoryCache.Remove($"general_all_{table}");
-                return Ok(new { Message = "Registro exitoso", Data = insertedData });
+                if (insertedData.Count > 0)
+                {
+                    await _hubContext.Clients.Group("PedidosGeneral")
+                        .SendAsync("NuevoRegistro", new
+                        {
+                            Tabla = table,
+                            Registro = insertedData,
+                            Accion = "Insert",
+                            UsuarioId = userId,
+                            Timestamp = DateTime.UtcNow
+                        });
+
+                    await _authUtils.InsertUserHistory(userId, "general insert", $"Registro en {table} con ID {insertedData["id"]}");
+                    _memoryCache.Remove($"general_all_{table}");
+                    return Ok(new { Message = "Registro exitoso", Data = insertedData });
+                }
+
+                return StatusCode(500, new { Message = "Error al insertar el registro - no se obtuvieron datos de retorno" });
             }
+            catch (SqlException sqlEx)
+            {
+                Console.WriteLine($"SQL Error: {sqlEx.Message}");
+                Console.WriteLine($"SQL Number: {sqlEx.Number}");
+                Console.WriteLine($"Procedure: {sqlEx.Procedure}");
+                Console.WriteLine($"Line Number: {sqlEx.LineNumber}");
 
-            return StatusCode(500, new { Message = "Error al insertar el registro" });
+                await _authUtils.InsertUserHistory(userId, "general insert sql error",
+                    $"Error SQL al insertar en {table}: {sqlEx.Message} (Error #{sqlEx.Number})");
+
+                return StatusCode(500, new
+                {
+                    Message = "Error de base de datos",
+                    Details = sqlEx.Message,
+                    ErrorNumber = sqlEx.Number,
+                    LineNumber = sqlEx.LineNumber
+                });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"General Error: {ex.Message}");
+                Console.WriteLine($"Stack Trace: {ex.StackTrace}");
+                if (ex.InnerException != null)
+                {
+                    Console.WriteLine($"Inner Exception: {ex.InnerException.Message}");
+                }
+
+                await _authUtils.InsertUserHistory(userId, "general insert error",
+                    $"Error al insertar en {table}: {ex.Message}");
+
+                return StatusCode(500, new
+                {
+                    Message = "Error interno del servidor",
+                    Details = ex.Message,
+                    StackTrace = ex.StackTrace,
+                    InnerException = ex.InnerException?.Message
+                });
+            }
         }
 
         // ✅ Actualización dinámica - CORREGIDO: Devuelve todos los datos actualizados
@@ -429,7 +490,7 @@ namespace MyApiProject.Controllers.general
         // ✅ Eliminación lógica - CORREGIDO: Devuelve los datos antes de archivar
         [Authorize]
         [HttpDelete("archivar/{id}")]
-        public async Task<IActionResult> Archivar([FromQuery] int id, [FromQuery] string? column = "id", [FromQuery] string? table = "general")
+        public async Task<IActionResult> Archivar(int id, [FromQuery] string? column = "id", [FromQuery] string? table = "general")
         {
             int userId;
             try { userId = ObtenerUsuarioId(); }
