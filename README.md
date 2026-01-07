@@ -104,7 +104,7 @@ Instalar un certificado de desarrollo HTTPS de ASP.NET Core.
 ## Publicar
 
 ```bash
-  dotnet publish  -o ./publish
+  dotnet publish  -o ./si
 ```
 
 ## Uso de API

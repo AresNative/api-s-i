@@ -19,13 +19,6 @@ namespace MyApiProject.Controllers.users
         [HttpPost("api/v1/users/register")]
         public async Task<IActionResult> RegistrarUsuario([FromBody] Usuario nuevoUsuario)
         {
-            int userId = GetUserIdFromToken();
-            if (userId == 0)
-            {
-                return Unauthorized(new { Message = "Token no válido o no se pudo extraer el ID del usuario." });
-            }
-            // Ejemplo de uso seguro del AuthUtils
-            await _authUtils.InsertUserHistory(userId, "upload", "Registro de usuario con email " + nuevoUsuario.email);
             return await InsertJsonToDatabaseAsync(
                 data: nuevoUsuario,
                 tableName: "usuarios",

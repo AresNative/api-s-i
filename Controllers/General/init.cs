@@ -284,8 +284,8 @@ namespace MyApiProject.Controllers.general
                         TotalRegistros = results.Count,
                         Timestamp = DateTime.UtcNow
                     });
-                await _authUtils.InsertUserHistory(userId, "general load with filters",
-                                    $"Consulta en general con {request.Filtros.Count} filtros, página {page}, tamaño {pageSize}");
+                /* await _authUtils.InsertUserHistory(userId, "general load with filters",
+                                    $"Consulta en general con {request.Filtros.Count} filtros, página {page}, tamaño {pageSize}"); */
 
                 return Ok(new
                 {
@@ -298,13 +298,11 @@ namespace MyApiProject.Controllers.general
             }
             catch (Exception ex)
             {
-                await _authUtils.InsertUserHistory(userId, "general error",
-                    $"Error en consulta con filtros: {ex.Message}");
+                /* await _authUtils.InsertUserHistory(userId, "general error",
+                    $"Error en consulta con filtros: {ex.Message}"); */
                 return StatusCode(500, new { Message = "Error interno del servidor", Details = ex.Message, counter = countQuery, query = paginatedQuery });
             }
         }
-
-        // ✅ Registro dinámico con JSON - CORREGIDO: Devuelve todos los datos insertados
         // ✅ Registro dinámico con SignalR
         [Authorize]
         [HttpPost("register")]
