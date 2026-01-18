@@ -423,66 +423,181 @@ namespace MyApiProject.Controllers.general
 
         // ✅ Actualización dinámica - CORREGIDO: Devuelve todos los datos actualizados
         [Authorize]
-        [HttpPut("update/{id}")]
-        public async Task<IActionResult> Actualizar(int id, [FromBody] JObject data, [FromQuery] string? column = "id", [FromQuery] string? table = "general")
+        [HttpPut("update/{tabla}")]
+        public async Task<IActionResult> Actualizar(string tabla, [FromBody] ActualizarRequest request)
         {
-            if (data == null) return BadRequest(new { Message = "JSON inválido" });
+            if (request?.Data == null)
+                return BadRequest(new { Message = "Datos inválidos o faltantes" });
 
-            int userId;
-            try { userId = ObtenerUsuarioId(); }
-            catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); }
-
-            var setClause = string.Join(",", data.Properties().Select(p => $"{p.Name} = @{p.Name}"));
-
-            string query = $@"
-            UPDATE {table} 
-            SET {setClause} 
-            OUTPUT INSERTED.*
-            WHERE {column} = @Id";
-
-            await using var connection = await OpenConnectionAsync();
-            await using var command = new SqlCommand(query, connection);
-            command.Parameters.AddWithValue("@Id", id);
-
-            foreach (var prop in data.Properties())
-                command.Parameters.AddWithValue("@" + prop.Name, prop.Value?.ToObject<object>() ?? DBNull.Value);
-
-            await using var reader = await command.ExecuteReaderAsync();
-            var updatedData = new Dictionary<string, object>();
-
-            if (await reader.ReadAsync())
+            try
             {
-                for (int i = 0; i < reader.FieldCount; i++)
+                // Construir WHERE clause dinámico desde los filtros
+                var whereClauses = new List<string>();
+                var parameters = new List<SqlParameter>();
+                var parameterCounters = new Dictionary<string, int>();
+
+                if (request.Filtros?.Filtros != null && request.Filtros.Filtros.Any())
                 {
-                    updatedData[reader.GetName(i)] = reader.GetValue(i);
-                }
-            }
+                    // Filtrar elementos vacíos
+                    var validFiltros = request.Filtros.Filtros
+                        .Where(f => !string.IsNullOrWhiteSpace(f.Key) && !string.IsNullOrWhiteSpace(f.Value))
+                        .ToList();
 
-            if (updatedData.Count > 0)
-            {
-                // Notificar a todos los clientes sobre la actualización
+                    if (!validFiltros.Any())
+                        return BadRequest(new { Message = "Se requieren filtros válidos para la actualización" });
+
+                    foreach (var filter in validFiltros)
+                    {
+                        string operatorClause = filter.Operator?.ToLower() switch
+                        {
+                            "like" => "LIKE",
+                            "=" => "=",
+                            ">=" => ">=",
+                            "<=" => "<=",
+                            ">" => ">",
+                            "<" => "<",
+                            "<>" => "<>",
+                            _ => "="
+                        };
+
+                        var column = filter.Key;
+                        if (!parameterCounters.ContainsKey(column))
+                            parameterCounters[column] = 0;
+                        else
+                            parameterCounters[column]++;
+
+                        var paramName = $"@where_{column.Replace(".", "_")}_{parameterCounters[column]}";
+                        whereClauses.Add($"{column} {operatorClause} {paramName}");
+
+                        var paramValue = operatorClause == "LIKE" ? $"%{filter.Value}%" : filter.Value;
+                        parameters.Add(new SqlParameter(paramName, paramValue));
+                    }
+                }
+                else
+                {
+                    return BadRequest(new { Message = "Se requieren filtros para la actualización" });
+                }
+
+                var whereClause = string.Join(" AND ", whereClauses);
+
+                // Construir SET clause
+                var setProperties = request.Data.Properties().Where(p => !string.IsNullOrEmpty(p.Name)).ToList();
+                if (!setProperties.Any())
+                    return BadRequest(new { Message = "No se proporcionaron datos para actualizar" });
+
+                var setClause = string.Join(", ", setProperties.Select(p =>
+                    $"{p.Name} = @set_{p.Name}"));
+
+                // Query de actualización
+                string query = $@"
+            UPDATE {tabla} 
+            SET {setClause} 
+            WHERE {whereClause};
+            
+            -- Devolver los datos actualizados
+            SELECT * FROM {tabla} WHERE {whereClause};";
+
+                Console.WriteLine($"=== UPDATE DEBUG ===");
+                Console.WriteLine($"Tabla: {tabla}");
+                Console.WriteLine($"WHERE clause: {whereClause}");
+                Console.WriteLine($"SET clause: {setClause}");
+                Console.WriteLine($"Query: {query}");
+
+                await using var connection = await OpenConnectionAsync();
+                await using var command = new SqlCommand(query, connection);
+
+                // Agregar parámetros SET
+                foreach (var prop in setProperties)
+                {
+                    var value = prop.Value?.ToObject<object>() ?? DBNull.Value;
+                    var paramName = $"@set_{prop.Name}";
+                    Console.WriteLine($"SET Parameter: {paramName} = {value} (Type: {value.GetType()})");
+                    command.Parameters.AddWithValue(paramName, value);
+                }
+
+                // Agregar parámetros WHERE
+                foreach (var param in parameters)
+                {
+                    Console.WriteLine($"WHERE Parameter: {param.ParameterName} = {param.Value} (Type: {param.Value?.GetType()})");
+                    command.Parameters.Add(param);
+                }
+
+                // Ejecutar y obtener resultados actualizados
+                var updatedResults = new List<Dictionary<string, object>>();
+
+                await using var reader = await command.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                {
+                    var row = new Dictionary<string, object>();
+                    for (int i = 0; i < reader.FieldCount; i++)
+                    {
+                        row[reader.GetName(i)] = reader.GetValue(i);
+                    }
+                    updatedResults.Add(row);
+                }
+
+                if (updatedResults.Count == 0)
+                {
+                    return NotFound(new { Message = "Registro no encontrado o no se pudo actualizar" });
+                }
+
+                // Generar un ID único para la notificación basado en los filtros
+                var notificationId = string.Join("_", request.Filtros.Filtros
+                    .Where(f => !string.IsNullOrWhiteSpace(f.Key) && !string.IsNullOrWhiteSpace(f.Value))
+                    .Select(f => $"{f.Key}_{f.Value}"));
+
+                // Notificaciones
                 await _hubContext.Clients.Group("PedidosGeneral")
                     .SendAsync("RegistroActualizado", new
                     {
-                        Tabla = table,
-                        RegistroId = id,
-                        DatosActualizados = updatedData,
+                        Tabla = tabla,
+                        Filtros = notificationId,
                         Accion = "Update",
-                        UsuarioId = userId,
-                        Timestamp = DateTime.UtcNow
+                        Timestamp = DateTime.UtcNow,
+                        RegistrosAfectados = updatedResults.Count
                     });
 
-                // Notificar específicamente al grupo del pedido si existe
-                await _hubContext.Clients.Group($"Pedido_{id}")
-                    .SendAsync("PedidoActualizado", updatedData);
+                // Limpiar caché apropiadamente
+                foreach (var filter in request.Filtros.Filtros.Where(f => !string.IsNullOrWhiteSpace(f.Key)))
+                {
+                    var cacheKey = $"general_{tabla}_{filter.Key}_{filter.Value}";
+                    _memoryCache.Remove(cacheKey);
+                }
+                _memoryCache.Remove($"general_all_{tabla}");
 
-                _memoryCache.Remove($"general_{table}_{id}");
-                _memoryCache.Remove($"general_all_{table}");
-                await _authUtils.InsertUserHistory(userId, "general update", $"Actualización en {table} con ID {id}");
-                return Ok(new { Message = "Actualización exitosa", Data = updatedData });
+                return Ok(new
+                {
+                    Message = "Actualización exitosa",
+                    RegistrosAfectados = updatedResults.Count,
+                    FiltrosAplicados = whereClause,
+                    Data = updatedResults
+                });
             }
+            catch (SqlException sqlEx)
+            {
+                Console.WriteLine($"SQL Error: {sqlEx.Message}");
+                Console.WriteLine($"Error Number: {sqlEx.Number}");
+                Console.WriteLine($"Line: {sqlEx.LineNumber}");
 
-            return NotFound(new { Message = "Registro no encontrado" });
+                return StatusCode(500, new
+                {
+                    Message = "Error de base de datos",
+                    Details = sqlEx.Message,
+                    ErrorNumber = sqlEx.Number,
+                    LineNumber = sqlEx.LineNumber
+                });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"General Error: {ex.Message}");
+                Console.WriteLine($"Stack: {ex.StackTrace}");
+
+                return StatusCode(500, new
+                {
+                    Message = "Error en la actualización",
+                    Details = ex.Message
+                });
+            }
         }
 
         // ✅ Eliminación lógica - CORREGIDO: Devuelve los datos antes de archivar
