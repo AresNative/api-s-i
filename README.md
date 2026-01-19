@@ -106,32 +106,3 @@ Instalar un certificado de desarrollo HTTPS de ASP.NET Core.
 ```bash
   dotnet publish  -o ./si
 ```
-
-## Uso de API
-
-#### Gets
-
-```http
-  GET /api/v1/glosarios/glosario-compras
-```
-
-| Parameter | Type     | Description                |
-| :-------- | :------- | :------------------------- |
-| `api_key` | `string` | **Required**. Your API key |
-
-#### Get item
-
-```http
-  POST /api/api/v1/reporteria/compras
-```
-
-| Parameter  | Type     | Description                                                  |
-| :--------- | :------- | :----------------------------------------------------------- |
-| `api_key`  | `string` | **Required**. Your API key                                   |
-| `sum`      | `bool`   | false/true                                                   |
-| `page`     | `number` | **Required**. Pagina en la que se encuentra                  |
-| `pageSize` | `numbre` | **Required**. Items por pagina                               |
-| Parameter  | Type     | Description                                                  |
-| **body**   | :------- | :-------------------------                                   |
-| `filtros`  | `any`    | [ {"key": "string", "value": "string","operator": "string"}] |
-| `sumas`    | `any`    | [ {"key": "string"}]                                         |
