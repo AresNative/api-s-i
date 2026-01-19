@@ -1,10 +1,6 @@
-# API de Administracion
+# API de Supermercados Mejia
 
-Basado en la BD de intelisis
-
-## Links
-
-[![portfolio](https://img.shields.io/badge/my_portfolio-000?style=for-the-badge&logo=ko-fi&logoColor=white)](https://eusebio.dev/)
+Api de uso general protegida por el uso de tokens
 
 ## Environment Variables 📌
 
@@ -106,3 +102,7 @@ Instalar un certificado de desarrollo HTTPS de ASP.NET Core.
 ```bash
   dotnet publish  -o ./si
 ```
+
+## Referencaias
+
+[![desarollador](https://img.shields.io/badge/my_portfolio-000?style=for-the-badge&logo=ko-fi&logoColor=white)](https://eusebio.dev/)
