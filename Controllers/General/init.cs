@@ -17,7 +17,6 @@ namespace MyApiProject.Controllers.general
     {
         private readonly IMemoryCache _memoryCache;
         private readonly AuthUtils _authUtils;
-
         private readonly IHubContext<GeneralHubs> _hubContext;
 
         public GeneralController(IConfiguration configuration, IMemoryCache memoryCache, AuthUtils authUtils,
@@ -140,7 +139,7 @@ namespace MyApiProject.Controllers.general
             return Ok(results);
         }
 
-        [Authorize]
+        /* [Authorize] */
         [HttpPost("consultar/filtros")]
         public async Task<IActionResult> ConsultarGeneralConFiltros(
             [FromBody] FiltrosRequest request,
@@ -148,9 +147,9 @@ namespace MyApiProject.Controllers.general
             [FromQuery] int page = 1,
             [FromQuery] int pageSize = 10)
         {
-            int userId;
-            try { userId = ObtenerUsuarioId(); }
-            catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); }
+            /*  int userId;
+             try { userId = ObtenerUsuarioId(); }
+             catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); } */
 
             if (page <= 0) page = 1;
             if (pageSize <= 0) pageSize = 10;
