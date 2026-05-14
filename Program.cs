@@ -62,9 +62,7 @@ builder.Services.Configure<ApiBehaviorOptions>(options =>
 // Registro de servicios
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<AuthUtils>();
-builder.Services.AddScoped<ScrumUtils>();
 builder.Services.AddScoped<TokensUtils>();
-builder.Services.AddScoped<FilterUtils>();
 
 // Registrar IMemoryCache
 builder.Services.AddMemoryCache(); // Esto es necesario para resolver IMemoryCache
@@ -75,13 +73,6 @@ var swaggerGroups = new[]
 {
     new { Name = "general", Title = "Solucion integral" },
     new { Name = "users",   Title = "Users" },
-    new { Name = "checador",Title = "Checador" },
-    new { Name = "scrum",   Title = "Scrum" },
-    new { Name = "ventas",  Title = "Ventas" },
-    new { Name = "proveedores", Title = "Proveedores" },
-    new { Name = "subasta", Title = "Subasta" },
-    new { Name = "masivo", Title = "Masivo" },
-    new { Name = "pickup", Title = "Pickup" },
     new { Name = "whatsapp", Title = "Whatsapp" }
 };
 // Configuración de Swagger con seguridad JWT optimizada

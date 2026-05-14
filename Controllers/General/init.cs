@@ -1,5 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.Data.SqlClient;
 using Microsoft.AspNetCore.Authorization;
 using Newtonsoft.Json.Linq;
@@ -15,85 +15,63 @@ namespace MyApiProject.Controllers.general
     [ApiController]
     public partial class GeneralController : BaseController
     {
+        private readonly ILogger<GeneralController> _logger;
         private readonly IMemoryCache _memoryCache;
         private readonly AuthUtils _authUtils;
         private readonly IHubContext<GeneralHubs> _hubContext;
 
-        public GeneralController(IConfiguration configuration, IMemoryCache memoryCache, AuthUtils authUtils,
+        public GeneralController(
+            IConfiguration configuration,
+            IMemoryCache memoryCache,
+            ILogger<GeneralController> logger,
+            AuthUtils authUtils,
             IHubContext<GeneralHubs> hubContext)
             : base(configuration, memoryCache)
         {
+            _logger = logger;
             _memoryCache = memoryCache;
             _authUtils = authUtils;
             _hubContext = hubContext;
         }
-        [Authorize]
-        [HttpOptions("test-cors")]
-        public IActionResult TestCors()
+
+        // ── Helpers internos ──────────────────────────────────────────────────
+
+        private async Task NotificarAsync(string evento, object payload) =>
+            await _hubContext.Clients.Group("PedidosGeneral").SendAsync(evento, payload);
+
+        private static async Task<List<Dictionary<string, object?>>> LeerFilasAsync(SqlDataReader reader)
         {
-            return Ok(new
-            {
-                Message = "CORS configurado correctamente",
-                AllowedMethods = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
-            });
-        }
-        // ✅ Consulta general (sin ID)
-        [Authorize]
-        [HttpGet("consultar")]
-        public async Task<IActionResult> ConsultarGeneral([FromQuery] string? table = "general")
-        {
-            int userId;
-            try { userId = ObtenerUsuarioId(); }
-            catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); }
-
-            string cacheKey = $"general_all_{table}";
-            if (_memoryCache.TryGetValue(cacheKey, out List<Dictionary<string, object>> cachedResults))
-            {
-                // Notificar a los clientes que se accedió a los datos
-                await _hubContext.Clients.Group("PedidosGeneral")
-                    .SendAsync("ConsultaRealizada", new
-                    {
-                        UsuarioId = userId,
-                        Tabla = table,
-                        Tipo = "ConsultaGeneral",
-                        Timestamp = DateTime.UtcNow
-                    });
-
-                return Ok(cachedResults);
-            }
-
-            string query = $"SELECT * FROM {table}";
-
-            await using var connection = await OpenConnectionAsync();
-            await using var command = new SqlCommand(query, connection);
-
-            await using var reader = await command.ExecuteReaderAsync();
-            var results = new List<Dictionary<string, object>>();
-
+            var results = new List<Dictionary<string, object?>>();
             while (await reader.ReadAsync())
             {
-                var row = new Dictionary<string, object>();
+                var row = new Dictionary<string, object?>();
                 for (int i = 0; i < reader.FieldCount; i++)
-                    row[reader.GetName(i)] = reader.GetValue(i);
+                    row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
                 results.Add(row);
             }
-
-            _memoryCache.Set(cacheKey, results, TimeSpan.FromMinutes(5));
-
-            // Notificar a todos los clientes conectados
-            await _hubContext.Clients.Group("PedidosGeneral")
-                .SendAsync("DatosActualizados", new
-                {
-                    Tabla = table,
-                    Accion = "Consulta",
-                    TotalRegistros = results.Count,
-                    Timestamp = DateTime.UtcNow
-                });
-
-            await _authUtils.InsertUserHistory(userId, "general load all", $"Consulta de todos los registros en {table}");
-            return Ok(results);
+            return results;
         }
 
+        /// <summary>
+        /// Valida tabla (contra INFORMATION_SCHEMA) y columna (regex de identificador).
+        /// Retorna BadRequest listo para devolver si alguno falla, o null si todo es válido.
+        /// </summary>
+        private async Task<IActionResult?> ValidarTablaYColumnaAsync(string table, string? column = null)
+        {
+            var (tableValid, tableError) = await ValidateFromClauseAsync(table);
+            if (!tableValid)
+                return BadRequest(new { Message = $"Tabla inválida: {tableError}" });
+
+            if (column != null)
+            {
+                var (colValid, colError) = ValidateIdentifier(column, "Columna");
+                if (!colValid)
+                    return BadRequest(new { Message = colError });
+            }
+
+            return null;
+        }
+        
         // ✅ Consulta por ID
         [Authorize]
         [HttpGet("consultar/{id}")]
@@ -139,168 +117,23 @@ namespace MyApiProject.Controllers.general
             return Ok(results);
         }
 
-        /* [Authorize] */
-        [HttpPost("consultar/filtros")]
-        public async Task<IActionResult> ConsultarGeneralConFiltros(
-            [FromBody] FiltrosRequest request,
-            [FromQuery] string? table = "general",
-            [FromQuery] int page = 1,
-            [FromQuery] int pageSize = 10)
+        [HttpPost("consultar")]
+        /* [ValidateToken] */
+        public async Task<IActionResult> ConsultarGeneral(
+            [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] FiltrosRequest? request,
+            [FromQuery] string fromClause = "")
         {
-            /*  int userId;
-             try { userId = ObtenerUsuarioId(); }
-             catch (UnauthorizedAccessException ex) { return Unauthorized(new { Message = ex.Message }); } */
+            request ??= new FiltrosRequest();
 
-            if (page <= 0) page = 1;
-            if (pageSize <= 0) pageSize = 10;
+            if (string.IsNullOrWhiteSpace(fromClause))
+                return BadRequest(new { Message = "El parámetro 'fromClause' es requerido." });
 
-            int offset = (page - 1) * pageSize;
+            // Validar el FROM clause antes de usarlo (regex + INFORMATION_SCHEMA)
+            var (valid, error) = await ValidateFromClauseAsync(fromClause);
+            if (!valid)
+                return BadRequest(new { Message = $"FROM clause inválido: {error}" });
 
-            // Construir la cláusula SELECT y GROUP BY
-            var (selectClause, groupByClause) = BuildSelectClause(request);
-            var baseQuery = $"FROM {table}";
-            var whereClauses = new List<string>();
-            var parameters = new List<SqlParameter>();
-            var parameterCounters = new Dictionary<string, int>();
-
-            // Procesar filtros
-            BuildFilters(request, whereClauses, parameters, parameterCounters);
-
-            // Agrupar condiciones
-            var groupedWhereClauses = AgruparCondiciones(whereClauses);
-
-            var whereQuery = groupedWhereClauses.Any()
-                ? $"WHERE {string.Join(" AND ", groupedWhereClauses)}"
-                : "";
-
-            // Construir ORDER BY
-            string orderByClause = BuildOrderByClause(request);
-
-            string countColumns;
-
-            if (!string.IsNullOrEmpty(groupByClause))
-            {
-                // Usar alias si existe, sino usar Key
-                countColumns = string.Join(", ", request.Selects
-                    .Where(s => !string.IsNullOrWhiteSpace(s.Key))
-                    .Select(s =>
-                        !string.IsNullOrWhiteSpace(s.Alias)
-                            ? $"{s.Key} AS {s.Alias}"  // 👈 aplica alias en el SELECT del subquery
-                            : s.Key
-                    ));
-            }
-            else
-            {
-                countColumns = GetGroupByColumnsForCount(request);
-            }
-
-
-            var countQuery = $@"
-            SELECT COUNT(*) AS TotalRegistros 
-            FROM (
-                SELECT {countColumns}
-                {baseQuery} {whereQuery}
-                {groupByClause}
-            ) AS CountTable";
-
-            // Construir query principal de manera más segura
-            var queryBuilder = new System.Text.StringBuilder();
-            queryBuilder.Append($"SELECT {selectClause} ");
-            queryBuilder.Append($"{baseQuery} ");
-
-            if (!string.IsNullOrEmpty(whereQuery))
-                queryBuilder.Append($"{whereQuery} ");
-
-            if (!string.IsNullOrEmpty(groupByClause))
-                queryBuilder.Append($"{groupByClause} ");
-
-            if (string.IsNullOrEmpty(orderByClause))
-                queryBuilder.Append("ORDER BY id ");
-            else
-                queryBuilder.Append($"{orderByClause} ");
-
-            queryBuilder.Append("OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY");
-
-            var paginatedQuery = queryBuilder.ToString();
-
-            try
-            {
-                await using var connection = await OpenConnectionAsync();
-
-                // Total records
-                var countCommandParameters = parameters
-                    .Select(p => new SqlParameter(p.ParameterName, p.Value))
-                    .ToList();
-
-                await using var countCommand = new SqlCommand(countQuery, connection);
-                countCommand.Parameters.AddRange(countCommandParameters.ToArray());
-                var totalRecords = (int)await countCommand.ExecuteScalarAsync();
-
-                // Paginated data
-                var paginatedParameters = parameters
-                    .Select(p => new SqlParameter(p.ParameterName, p.Value))
-                    .ToList();
-
-                paginatedParameters.AddRange(new[]
-                {
-                    new SqlParameter("@Offset", offset),
-                    new SqlParameter("@PageSize", pageSize)
-                });
-
-                await using var command = new SqlCommand(paginatedQuery, connection);
-                command.Parameters.AddRange(paginatedParameters.ToArray());
-
-                var results = new List<Dictionary<string, object>>();
-
-                await using var reader = await command.ExecuteReaderAsync();
-                while (await reader.ReadAsync())
-                {
-                    var row = new Dictionary<string, object>();
-                    for (int i = 0; i < reader.FieldCount; i++)
-                    {
-                        row[reader.GetName(i)] = reader.GetValue(i);
-                    }
-                    results.Add(row);
-                }
-
-                // Cache
-                var validFiltros = request.Filtros
-                    .Where(f => !string.IsNullOrWhiteSpace(f.Key) && !string.IsNullOrWhiteSpace(f.Value))
-                    .ToList();
-
-                var filtrosCacheKey = string.Join("_", validFiltros
-                    .Select(f => $"{f.Key}_{f.Value}_{f.Operator}"));
-
-                var cacheKey = $"general_filtros_{filtrosCacheKey}_page{page}_size{pageSize}";
-                _memoryCache.Set(cacheKey, results, TimeSpan.FromMinutes(5));
-
-                // Notificar a todos los clientes conectados
-                await _hubContext.Clients.Group("PedidosGeneral")
-                    .SendAsync("DatosActualizados", new
-                    {
-                        Tabla = table,
-                        Accion = "ConsultaFiltros",
-                        TotalRegistros = results.Count,
-                        Timestamp = DateTime.UtcNow
-                    });
-                /* await _authUtils.InsertUserHistory(userId, "general load with filters",
-                                    $"Consulta en general con {request.Filtros.Count} filtros, página {page}, tamaño {pageSize}"); */
-
-                return Ok(new
-                {
-                    TotalRecords = totalRecords,
-                    TotalPages = (int)Math.Ceiling(totalRecords / (double)pageSize),
-                    PageSize = pageSize,
-                    Page = page,
-                    Data = results
-                });
-            }
-            catch (Exception ex)
-            {
-                /* await _authUtils.InsertUserHistory(userId, "general error",
-                    $"Error en consulta con filtros: {ex.Message}"); */
-                return StatusCode(500, new { Message = "Error interno del servidor", Details = ex.Message, counter = countQuery, query = paginatedQuery });
-            }
+            return await ExecuteMassiveQueryAsync(request, fromClause, _logger);
         }
         // ✅ Registro dinámico con SignalR
         [Authorize]
@@ -308,6 +141,23 @@ namespace MyApiProject.Controllers.general
         public async Task<IActionResult> Registrar([FromBody] JObject data, [FromQuery] string? table = "general")
         {
             if (data == null) return BadRequest(new { Message = "JSON inválido" });
+            
+            var validacion = await ValidarTablaYColumnaAsync(table);
+            if (validacion != null) return validacion;
+
+            var properties = data.Properties()
+                .Where(p => !string.IsNullOrWhiteSpace(p.Name))
+                .ToList();
+
+            if (!properties.Any())
+                return BadRequest(new { Message = "El JSON no contiene propiedades válidas." });
+
+            // Validar también los nombres de columna del JSON recibido
+            foreach (var prop in properties)
+            {
+                var (colValid, colError) = ValidateIdentifier(prop.Name, "Columna");
+                if (!colValid) return BadRequest(new { Message = colError });
+            }
 
             int userId;
             try { userId = ObtenerUsuarioId(); }
@@ -315,11 +165,6 @@ namespace MyApiProject.Controllers.general
 
             try
             {
-                Console.WriteLine($"=== REGISTER DEBUG ===");
-                Console.WriteLine($"Tabla: {table}");
-                Console.WriteLine($"Usuario ID: {userId}");
-                Console.WriteLine($"JSON recibido: {data.ToString()}");
-
                 var columnNames = string.Join(", ", data.Properties().Select(p => $"[{p.Name}]"));
                 var parameterNames = string.Join(", ", data.Properties().Select(p => $"@{p.Name}"));
 
@@ -338,14 +183,10 @@ namespace MyApiProject.Controllers.general
                 foreach (var prop in data.Properties())
                 {
                     var value = prop.Value?.ToObject<object>() ?? DBNull.Value;
-                    Console.WriteLine($"Parámetro: @{prop.Name} = {value} (Tipo: {value.GetType()})");
                     command.Parameters.AddWithValue("@" + prop.Name, value);
                 }
-
-                Console.WriteLine("Ejecutando consulta...");
+                
                 await using var reader = await command.ExecuteReaderAsync();
-                Console.WriteLine("Consulta ejecutada");
-
                 var insertedData = new Dictionary<string, object>();
 
                 if (await reader.ReadAsync())
@@ -354,11 +195,6 @@ namespace MyApiProject.Controllers.general
                     {
                         insertedData[reader.GetName(i)] = reader.GetValue(i);
                     }
-                    Console.WriteLine($"Datos insertados: {System.Text.Json.JsonSerializer.Serialize(insertedData)}");
-                }
-                else
-                {
-                    Console.WriteLine("No se pudo leer los datos insertados");
                 }
 
                 if (insertedData.Count > 0)
@@ -382,10 +218,6 @@ namespace MyApiProject.Controllers.general
             }
             catch (SqlException sqlEx)
             {
-                Console.WriteLine($"SQL Error: {sqlEx.Message}");
-                Console.WriteLine($"SQL Number: {sqlEx.Number}");
-                Console.WriteLine($"Procedure: {sqlEx.Procedure}");
-                Console.WriteLine($"Line Number: {sqlEx.LineNumber}");
 
                 await _authUtils.InsertUserHistory(userId, "general insert sql error",
                     $"Error SQL al insertar en {table}: {sqlEx.Message} (Error #{sqlEx.Number})");
@@ -400,8 +232,6 @@ namespace MyApiProject.Controllers.general
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"General Error: {ex.Message}");
-                Console.WriteLine($"Stack Trace: {ex.StackTrace}");
                 if (ex.InnerException != null)
                 {
                     Console.WriteLine($"Inner Exception: {ex.InnerException.Message}");
@@ -425,177 +255,114 @@ namespace MyApiProject.Controllers.general
         [HttpPut("update/{tabla}")]
         public async Task<IActionResult> Actualizar(string tabla, [FromBody] ActualizarRequest request)
         {
-            if (request?.Data == null)
-                return BadRequest(new { Message = "Datos inválidos o faltantes" });
+            var validacion = await ValidarTablaYColumnaAsync(tabla);
+            if (validacion != null) return validacion;
+
+            var filtros = request.Filtros?
+                .Where(f => !string.IsNullOrWhiteSpace(f.Key) && !string.IsNullOrWhiteSpace(f.Value))
+                .ToList();
+
+            if (filtros == null || !filtros.Any())
+                return BadRequest(new { Message = "Se requieren filtros válidos para la actualización." });
+
+            var whereConditions = new List<(string column, string op, string value)>();
+            foreach (var f in filtros)
+            {
+                var op = NormalizeSimpleOperator(f.Operator);
+                whereConditions.Add((f.Key, op, f.Value));
+            }
+
+            var setProperties = request.Data.Properties()
+                .Where(p => !string.IsNullOrWhiteSpace(p.Name))
+                .ToList();
+
+            if (!setProperties.Any())
+                return BadRequest(new { Message = "El JSON no contiene propiedades válidas para actualizar." });
+
+            // Validar también los nombres de columna del JSON recibido
+            foreach (var prop in setProperties)
+            {
+                var (colValid, colError) = ValidateIdentifier(prop.Name, "Columna");
+                if (!colValid) return BadRequest(new { Message = colError });
+            }
+
+            var setClause = string.Join(", ", setProperties.Select(p => $"[{p.Name}] = @s_{p.Name}"));
+
+            // Construir cláusula WHERE
+            var whereParts = new List<string>();
+            for (int i = 0; i < whereConditions.Count; i++)
+                whereParts.Add($"[{whereConditions[i].column}] {whereConditions[i].op} @w{i}");
+            var whereClause = string.Join(" AND ", whereParts);
+            var updateQuery = $"UPDATE [{tabla}] SET {setClause} WHERE {whereClause}";
+            var selectQuery = $"SELECT * FROM [{tabla}] WHERE {whereClause}";
 
             try
             {
-                // Construir WHERE clause dinámico desde los filtros
-                var whereClauses = new List<string>();
-                var parameters = new List<SqlParameter>();
-                var parameterCounters = new Dictionary<string, int>();
-
-                if (request.Filtros?.Filtros != null && request.Filtros.Filtros.Any())
-                {
-                    // Filtrar elementos vacíos
-                    var validFiltros = request.Filtros.Filtros
-                        .Where(f => !string.IsNullOrWhiteSpace(f.Key) && !string.IsNullOrWhiteSpace(f.Value))
-                        .ToList();
-
-                    if (!validFiltros.Any())
-                        return BadRequest(new { Message = "Se requieren filtros válidos para la actualización" });
-
-                    foreach (var filter in validFiltros)
-                    {
-                        string operatorClause = filter.Operator?.ToLower() switch
-                        {
-                            "like" => "LIKE",
-                            "=" => "=",
-                            ">=" => ">=",
-                            "<=" => "<=",
-                            ">" => ">",
-                            "<" => "<",
-                            "<>" => "<>",
-                            _ => "="
-                        };
-
-                        var column = filter.Key;
-                        if (!parameterCounters.ContainsKey(column))
-                            parameterCounters[column] = 0;
-                        else
-                            parameterCounters[column]++;
-
-                        var paramName = $"@where_{column.Replace(".", "_")}_{parameterCounters[column]}";
-                        whereClauses.Add($"{column} {operatorClause} {paramName}");
-
-                        var paramValue = operatorClause == "LIKE" ? $"%{filter.Value}%" : filter.Value;
-                        parameters.Add(new SqlParameter(paramName, paramValue));
-                    }
-                }
-                else
-                {
-                    return BadRequest(new { Message = "Se requieren filtros para la actualización" });
-                }
-
-                var whereClause = string.Join(" AND ", whereClauses);
-
-                // Construir SET clause
-                var setProperties = request.Data.Properties().Where(p => !string.IsNullOrEmpty(p.Name)).ToList();
-                if (!setProperties.Any())
-                    return BadRequest(new { Message = "No se proporcionaron datos para actualizar" });
-
-                var setClause = string.Join(", ", setProperties.Select(p =>
-                    $"{p.Name} = @set_{p.Name}"));
-
-                // Query de actualización
-                string query = $@"
-            UPDATE {tabla} 
-            SET {setClause} 
-            WHERE {whereClause};
-            
-            -- Devolver los datos actualizados
-            SELECT * FROM {tabla} WHERE {whereClause};";
-
-                Console.WriteLine($"=== UPDATE DEBUG ===");
-                Console.WriteLine($"Tabla: {tabla}");
-                Console.WriteLine($"WHERE clause: {whereClause}");
-                Console.WriteLine($"SET clause: {setClause}");
-                Console.WriteLine($"Query: {query}");
-
                 await using var connection = await OpenConnectionAsync();
-                await using var command = new SqlCommand(query, connection);
 
-                // Agregar parámetros SET
-                foreach (var prop in setProperties)
+                // ---- UPDATE (sin transacción) ----
+                int rowsAffected;
+                using (var updateCmd = new SqlCommand(updateQuery, connection))
                 {
-                    var value = prop.Value?.ToObject<object>() ?? DBNull.Value;
-                    var paramName = $"@set_{prop.Name}";
-                    Console.WriteLine($"SET Parameter: {paramName} = {value} (Type: {value.GetType()})");
-                    command.Parameters.AddWithValue(paramName, value);
-                }
+                    // Parámetros SET
+                    foreach (var prop in setProperties)
+                        updateCmd.Parameters.AddWithValue($"@s_{prop.Name}", prop.Value?.ToObject<object>() ?? DBNull.Value);
 
-                // Agregar parámetros WHERE
-                foreach (var param in parameters)
-                {
-                    Console.WriteLine($"WHERE Parameter: {param.ParameterName} = {param.Value} (Type: {param.Value?.GetType()})");
-                    command.Parameters.Add(param);
-                }
-
-                // Ejecutar y obtener resultados actualizados
-                var updatedResults = new List<Dictionary<string, object>>();
-
-                await using var reader = await command.ExecuteReaderAsync();
-                while (await reader.ReadAsync())
-                {
-                    var row = new Dictionary<string, object>();
-                    for (int i = 0; i < reader.FieldCount; i++)
+                    // Parámetros WHERE
+                    for (int i = 0; i < whereConditions.Count; i++)
                     {
-                        row[reader.GetName(i)] = reader.GetValue(i);
+                        var (_, op, value) = whereConditions[i];
+                        var pName = $"@w{i}";
+                        var paramValue = (op == "LIKE" && !value.StartsWith("%") && !value.EndsWith("%")) ? $"%{value}%" : value;
+                        var param = QB.CreateTypedParameter(pName, paramValue);
+                        updateCmd.Parameters.Add(param);
                     }
-                    updatedResults.Add(row);
-                }
 
-                if (updatedResults.Count == 0)
+                    rowsAffected = await updateCmd.ExecuteNonQueryAsync();
+                } // updateCmd se cierra aquí
+
+                if (rowsAffected == 0)
+                    return NotFound(new { Message = "Registro no encontrado o no se pudo actualizar." });
+
+                // ---- SELECT (usando la misma conexión, pero con nuevo comando) ----
+                List<Dictionary<string, object?>> updatedResults;
+                using (var selectCmd = new SqlCommand(selectQuery, connection))
                 {
-                    return NotFound(new { Message = "Registro no encontrado o no se pudo actualizar" });
-                }
-
-                // Generar un ID único para la notificación basado en los filtros
-                var notificationId = string.Join("_", request.Filtros.Filtros
-                    .Where(f => !string.IsNullOrWhiteSpace(f.Key) && !string.IsNullOrWhiteSpace(f.Value))
-                    .Select(f => $"{f.Key}_{f.Value}"));
-
-                // Notificaciones
-                await _hubContext.Clients.Group("PedidosGeneral")
-                    .SendAsync("RegistroActualizado", new
+                    // Recrear parámetros WHERE
+                    for (int i = 0; i < whereConditions.Count; i++)
                     {
-                        Tabla = tabla,
-                        Filtros = notificationId,
-                        Accion = "Update",
-                        Timestamp = DateTime.UtcNow,
-                        RegistrosAfectados = updatedResults.Count
-                    });
+                        var (_, op, value) = whereConditions[i];
+                        var pName = $"@w{i}";
+                        var paramValue = (op == "LIKE" && !value.StartsWith("%") && !value.EndsWith("%")) ? $"%{value}%" : value;
+                        var param = QB.CreateTypedParameter(pName, paramValue);
+                        selectCmd.Parameters.Add(param);
+                    }
 
-                // Limpiar caché apropiadamente
-                foreach (var filter in request.Filtros.Filtros.Where(f => !string.IsNullOrWhiteSpace(f.Key)))
-                {
-                    var cacheKey = $"general_{tabla}_{filter.Key}_{filter.Value}";
-                    _memoryCache.Remove(cacheKey);
+                    await using var reader = await selectCmd.ExecuteReaderAsync();
+                    updatedResults = await LeerFilasAsync(reader);
                 }
-                _memoryCache.Remove($"general_all_{tabla}");
 
-                return Ok(new
-                {
-                    Message = "Actualización exitosa",
-                    RegistrosAfectados = updatedResults.Count,
-                    FiltrosAplicados = whereClause,
-                    Data = updatedResults
-                });
-            }
-            catch (SqlException sqlEx)
-            {
-                Console.WriteLine($"SQL Error: {sqlEx.Message}");
-                Console.WriteLine($"Error Number: {sqlEx.Number}");
-                Console.WriteLine($"Line: {sqlEx.LineNumber}");
+                // Limpiar caché
+                foreach (var f in filtros)
+                    _cache.Remove($"general_{tabla}_{f.Key}_{f.Value}");
+                _cache.Remove($"general_all_{tabla}");
 
-                return StatusCode(500, new
+                // Notificar
+                var notifId = string.Join("_", filtros.Select(f => $"{f.Key}_{f.Value}"));
+                await NotificarAsync("RegistroActualizado", new
                 {
-                    Message = "Error de base de datos",
-                    Details = sqlEx.Message,
-                    ErrorNumber = sqlEx.Number,
-                    LineNumber = sqlEx.LineNumber
+                    Tabla = tabla,
+                    Filtros = notifId,
+                    Accion = "Update",
+                    Timestamp = DateTime.UtcNow,
+                    RegistrosAfectados = updatedResults.Count
                 });
+
+                return Ok(new { Message = "Actualización exitosa.", RegistrosAfectados = updatedResults.Count, Data = updatedResults });
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"General Error: {ex.Message}");
-                Console.WriteLine($"Stack: {ex.StackTrace}");
-
-                return StatusCode(500, new
-                {
-                    Message = "Error en la actualización",
-                    Details = ex.Message
-                });
+                return HandleException(ex, $"Actualizar tabla={tabla}");
             }
         }
 
