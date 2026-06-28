@@ -145,7 +145,7 @@ namespace MyApiProject.Controllers.general
 
         [Authorize]
         [HttpDelete("imagenes/delete/{id}")]
-        public async Task<IActionResult> EliminarImagen(long id)
+        public async Task<IActionResult> EliminarImagen(string id)
         {
             int userId;
             try { userId = ObtenerUsuarioId(); }
@@ -164,7 +164,7 @@ namespace MyApiProject.Controllers.general
                 if (!await reader.ReadAsync())
                     return NotFound(new { Message = "Imagen no encontrada" });
 
-                var idRef = reader.GetInt64(0);
+                var idRef = reader.GetString(0);
                 var tabla = reader.GetString(1);
                 var url = reader.GetString(2);
                 reader.Close();
@@ -348,7 +348,7 @@ namespace MyApiProject.Controllers.general
                 if (!await reader.ReadAsync())
                     return NotFound(new { Message = "Archivo no encontrado" });
 
-                var idRef = reader.GetInt64(0);
+                var idRef = reader.GetString(0);
                 var tabla = reader.GetString(1);
                 var url = reader.GetString(2);
                 reader.Close();
@@ -498,7 +498,7 @@ namespace MyApiProject.Controllers.general
 
         public class UploadRecursoRequest
         {
-            public long IdRef { get; set; }
+            public string IdRef { get; set; }
             public string Tabla { get; set; }
             public string Descripcion { get; set; }
             public IFormFile File { get; set; }
