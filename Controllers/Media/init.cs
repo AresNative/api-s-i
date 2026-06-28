@@ -329,7 +329,7 @@ namespace MyApiProject.Controllers.general
 
         [Authorize]
         [HttpDelete("archivos/delete/{id}")]
-        public async Task<IActionResult> EliminarArchivo(long id)
+        public async Task<IActionResult> EliminarArchivo(string id)
         {
             int userId;
             try { userId = ObtenerUsuarioId(); }
